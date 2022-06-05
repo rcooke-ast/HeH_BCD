@@ -1,2 +1,3 @@
 # HeH_BCD
-Ongoing work
+
+This repo contains ongoing work that has not yet been fully tested.

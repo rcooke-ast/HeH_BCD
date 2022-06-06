@@ -15,8 +15,7 @@ from matplotlib import cm
 import matplotlib.transforms as mtransforms
 from matplotlib.widgets import Button, Slider
 
-import mpfit_single as mpfit
-from scipy.special import wofz
+from scipy.ndimage import gaussian_filter1d
 import astropy.io.fits as fits
 from astropy.wcs import WCS
 from atomic_info import GetAtomProp
@@ -58,7 +57,7 @@ class CubeFitter:
     GUI to interactively fit emission and absorption lines in a datacube.
     """
 
-    def __init__(self, canvas, axes, specim, wave, datacube, sigcube, idx, idy, atomprop, y_log=True):
+    def __init__(self, canvas, axes, specim, wave, datacube, sigcube, mskcube, all_maps, map_name, idx, idy, atomprop, y_log=True):
         """Controls for the Identify task in PypeIt.
 
         The main goal of this routine is to interactively identify arc lines
@@ -79,6 +78,8 @@ class CubeFitter:
         self.axes = axes
         # Initialise the spectrum properties
         self.specim = specim
+        self.maps = all_maps
+        self.map_name = map_name
         self.spec = specim['spec']#.get_ydata()
         self.speczoom = specim['speczoom']#.get_ydata()
         self.model = specim['model']#.get_ydata()
@@ -95,6 +96,7 @@ class CubeFitter:
         # datacube
         self.datacube = datacube
         self.sigcube = sigcube
+        self.maskcube = mskcube
         # Fitting properties
         self._fitdict = dict(model=None)
         # Unset some of the matplotlib keymaps
@@ -125,8 +127,8 @@ class CubeFitter:
         self._idx, self._idy = idx, idy
         self._nx, self._ny = self.datacube.shape[1], self.datacube.shape[2]
         self._coord = [idx, idy]
-        self._fitr = None  # Matplotlib shaded fit region (for refitting lines)
-        self._fitregions = np.zeros(self.curr_wave.size, dtype=np.int)  # Mask of the pixels to be included in a fit
+        self._fitr, self._fitrzoom, self._fitrresid = None, None, None  # Matplotlib shaded fit region (for refitting lines)
+        self._fitregions = self.maskcube[:, idx, idy]  # Mask of the pixels to be included in a fit
         self._addsub = 0   # Adding a region (1) or removing (0)
         self._msedown = False  # Is the mouse button being held down (i.e. dragged)
         self._respreq = [False, None]  # Does the user need to provide a response before any other operation will be permitted? Once the user responds, the second element of this array provides the action to be performed.
@@ -159,6 +161,8 @@ class CubeFitter:
         whitelight = np.sum(datcube, axis=0)/np.sum(sigcube == 0, axis=0)
         flx_map = np.zeros_like(whitelight)
         err_map = np.zeros_like(whitelight)
+        cnt_map = np.zeros_like(whitelight)
+        par_map = None
 
         mapname = get_mapname(dirc, fname, line)
         if refit:
@@ -167,14 +171,24 @@ class CubeFitter:
                 print(f"fitting row {xx+1}/{datcube.shape[1]}")
                 for yy in range(datcube.shape[2]):
                     flx, err, msk = datcube[:, xx, yy], sigcube[:, xx, yy], mskcube[:, xx, yy]
-                    flxsum, errsum = fitting.fit_one_cont(atom_prop, wave, flx, err, msk, contsample=100, verbose=False)
+                    flxsum, errsum, contval, pars = fitting.fit_one_cont(atom_prop, wave, flx, err, msk, contsample=100, verbose=False)
+                    if flxsum is None:
+                        # Something failed.
+                        continue
                     flx_map[xx, yy] = flxsum
                     err_map[xx, yy] = errsum
-            save_maps(mapname, flx_map, err_map)
+                    cnt_map[xx, yy] = contval
+                    if par_map is None:
+                        par_map = np.zeros((pars.size, flx_map.shape[0], flx_map.shape[1]))
+                    par_map[:, xx, yy] = pars
+            save_maps(mapname, flx_map, err_map, cnt_map, par_map, mskcube)
         # Load the saved maps to check it worked, and put it in the correct format
-        all_maps = load_maps(mapname)
+        all_maps, mskcube = load_maps(mapname)
 
+        # Set the starting location, and generate the model at this location
         idx, idy = datcube.shape[1]//2, datcube.shape[2]//2
+        _, _, index = fitting.prepare_fitting(atom_prop, wave, datcube[:, idx, idy])
+        model = fitting.full_model(all_maps['params'][:,idx,idy], wave, index)
         # Create a Line2D instance for the spectrum
         spec = Line2D(wave, datcube[:, idx, idy],
                       linewidth=1, linestyle='solid', color='k',
@@ -184,11 +198,11 @@ class CubeFitter:
                           linewidth=1, linestyle='solid', color='k',
                           drawstyle='steps-mid', animated=True)
 
-        specfit = Line2D(wave, np.ones(wave.size),
+        specfit = Line2D(wave, model,
                          linewidth=1, linestyle='solid', color='r',
                          animated=True)
 
-        resid = Line2D(wave, np.zeros(wave.size),
+        resid = Line2D(wave, (datcube[:, idx, idy]-model)*inverse(sigcube[:, idx, idy]),
                       linewidth=1, linestyle='solid', color='k',
                       drawstyle='steps-mid', animated=True)
 
@@ -224,9 +238,9 @@ class CubeFitter:
         wlpt = axwl.scatter([idx], [idy], marker='x', color='b')
 
         # Add two residual fitting axes
-        axfit = fig.add_axes([0.05, .2, .55, 0.25])
+        axfit = fig.add_axes([0.05, .22, .55, 0.25])
         axfit.sharex(ax)
-        axres = fig.add_axes([0.05, .05, .55, 0.15])
+        axres = fig.add_axes([0.05, .05, .55, 0.17])
         axres.sharex(ax)
 
         # Residuals
@@ -241,7 +255,7 @@ class CubeFitter:
         # Zoom in for continuum
         axfit.add_line(speczoom)
         axfit.add_line(specfit)
-        axfit.set_ylim((-0.3, 0.3))  # This will get updated as lines are identified
+        axfit.set_ylim((0, 0.5))  # This will get updated as lines are identified
         axfit.set_ylabel('Flux')
 
         # Add an information GUI axis
@@ -257,7 +271,7 @@ class CubeFitter:
         specim = dict(im=im, imwl=imwl, spec=spec, speczoom=speczoom, model=specfit, resid=resid, pt_map=mappt, pt_wl=wlpt)
         # Initialise the identify window and display to screen
         fig.canvas.set_window_title('CubeFitter')
-        fitter = CubeFitter(fig.canvas, axes, specim, wave, datcube, sigcube, idx, idy, atom_prop, y_log=y_log)
+        fitter = CubeFitter(fig.canvas, axes, specim, wave, datcube, sigcube, mskcube, all_maps, mapname, idx, idy, atom_prop, y_log=y_log)
 
         plt.show()
 
@@ -341,16 +355,19 @@ class CubeFitter:
         self.background = self.canvas.copy_from_bbox(self.axes['main'].bbox)
         # Set the axis transform
         trans = mtransforms.blended_transform_factory(self.axes['main'].transData, self.axes['main'].transAxes)
-        self.draw_fitregions(trans)
+        transZoom = mtransforms.blended_transform_factory(self.axes['fit'].transData, self.axes['fit'].transAxes)
+        transResid = mtransforms.blended_transform_factory(self.axes['resid'].transData, self.axes['resid'].transAxes)
+        self.draw_fitregions(trans, transZoom, transResid)
         self.axes['main'].draw_artist(self.spec)
         self.axes['fit'].draw_artist(self.speczoom)
+        self.axes['fit'].draw_artist(self.model)
         self.axes['resid'].draw_artist(self.resid)
         self.axes['fmap'].draw_artist(self.image)
         self.axes['fmap'].draw_artist(self.pt_map)
         self.axes['fwl'].draw_artist(self.wlimage)
         self.axes['fwl'].draw_artist(self.pt_wl)
 
-    def draw_fitregions(self, trans):
+    def draw_fitregions(self, transMain, transZoom, transResid):
         """Refresh the fit regions
 
         Args:
@@ -363,7 +380,17 @@ class CubeFitter:
         # Fudge to get the leftmost pixel shaded in too
         regwhr[np.where((self._fitregions[:-1] == 0) & (self._fitregions[1:] == 1))] = True
         self._fitr = self.axes['main'].fill_between(self.curr_wave, 0, 1, where=regwhr, facecolor='green',
-                                                    alpha=0.5, transform=trans)
+                                                    alpha=0.5, transform=transMain)
+        # Do the zoom in plot
+        if self._fitrzoom is not None:
+            self._fitrzoom.remove()
+        self._fitrzoom = self.axes['fit'].fill_between(self.curr_wave, 0, 1, where=regwhr, facecolor='green',
+                                                    alpha=0.5, transform=transZoom)
+        # Do the residual plot
+        if self._fitrresid is not None:
+            self._fitrresid.remove()
+        self._fitrresid = self.axes['resid'].fill_between(self.curr_wave, 0, 1, where=regwhr, facecolor='green',
+                                                    alpha=0.5, transform=transResid)
 
     def get_ind_under_point(self, event):
         """Get the index of the line closest to the cursor
@@ -494,8 +521,10 @@ class CubeFitter:
 
         # Now plot
         trans = mtransforms.blended_transform_factory(self.axes['main'].transData, self.axes['main'].transAxes)
+        transZoom = mtransforms.blended_transform_factory(self.axes['fit'].transData, self.axes['fit'].transAxes)
+        transResid = mtransforms.blended_transform_factory(self.axes['resid'].transData, self.axes['resid'].transAxes)
         self.canvas.restore_region(self.background)
-        self.draw_fitregions(trans)
+        self.draw_fitregions(trans, transZoom, transResid)
         # Now replot everything
         self.replot()
 
@@ -581,6 +610,8 @@ class CubeFitter:
                 self._qconf = True
             else:
                 plt.close()
+        elif key == 's':
+            save_maps(self.map_name, self.maps['flux'], self.maps['errs'], self.maps['cont'], self.maps['params'])
         elif key == 'y':
             self.toggle_yscale()
             self.replot()
@@ -683,9 +714,11 @@ class CubeFitter:
         self.curr_flux = self.datacube[:, self._idx, self._idy]
         self.curr_err = self.sigcube[:, self._idx, self._idy]
         # Update the plots
-        model = np.zeros(self.curr_wave.size)
+        self._fitregions = self.maskcube[:, self._idx, self._idy]
+        _, _, index = fitting.prepare_fitting(self._atomprop, self.curr_wave, self.datacube[:, self._idx, self._idy])
+        model = fitting.full_model(self.maps['params'][:, self._idx, self._idy], wave, index)
         self.model.set_ydata(model)
-        self.resid.set_ydata(model)
+        self.resid.set_ydata((self.curr_flux-model)*inverse(self.curr_err))
         self.spec.set_ydata(self.curr_flux)
         self.speczoom.set_ydata(self.curr_flux)
         # Update the limits
@@ -720,16 +753,15 @@ def make_mask(wave, datcube, waveobs, delwave):
     npix, nxx, nyy = extcube.shape
     idx = np.unravel_index(np.argmax(extcube), extcube.shape)
     # Calculate the mask for this set of pixels
-    spec = datcube[ww, idx[1], idx[2]]
+    spec = gaussian_filter1d(datcube[ww, idx[1], idx[2]], 1)
     refidx = idx[0]
     refmsk = mask_one(spec, refidx)
     refsum = np.sum(refmsk)
     mskcube[ww, idx[1], idx[2]] = refmsk.copy()
     # Loop through all pixels and produce a mask
-    embed()
     for xx in range(nxx):
         for yy in range(nyy):
-            spec = datcube[ww, xx, yy]
+            spec = gaussian_filter1d(datcube[ww, xx, yy], 1)
             if np.all(spec==0.0): continue
             smx = np.argmax(spec)
             # Check if it's a confident detection
@@ -741,16 +773,16 @@ def make_mask(wave, datcube, waveobs, delwave):
             # Generate a new mask
             thismsk = mask_one(spec, smx)
             if thismsk is None:
-                mskcube[ww, idx[1], idx[2]] = refmsk.copy()
+                mskcube[ww, xx, yy] = refmsk.copy()
             elif np.sum(thismsk) < refsum:
                 # Just use the reference mask to be conservative
-                mskcube[ww+smx-refidx, idx[1], idx[2]] = refmsk.copy()
+                mskcube[ww+smx-refidx, xx, yy] = refmsk.copy()
             else:
-                mskcube[ww, idx[1], idx[2]] = thismsk.copy()
+                mskcube[ww, xx, yy] = thismsk.copy()
     return mskcube
 
 
-def mask_one(spec, idx, pad=5):
+def mask_one(spec, idx, pad=3):
     # Starting with spec[idx], mask all pixels deemed to continue flux from an emission line
     try:
         diff = spec[1:]-spec[:-1]
@@ -760,8 +792,8 @@ def mask_one(spec, idx, pad=5):
         # Look for pixels to the blue of an emission line
         wgd = np.where(diff<0)[0]
         wlo = wgd[np.where(wgd<idx)][-1]
-        msk = np.zeros_like(spec)
-        msk[wlo-pad:wup+pad] = 1
+        msk = np.ones_like(spec)
+        msk[wlo-pad:wup+pad] = 0
     except:
         msk = None
     return msk
@@ -785,28 +817,37 @@ def grow_mask(msk):
     return newmsk
 
 def load_maps(mapname):
-    data = np.load(mapname)
-    maps = dict(flux=data[:,:,0], errs=data[:,:,1])
-    return maps
+    data = fits.open(mapname)
+    maps = dict(flux=data[0].data, errs=data[1].data, cont=data[2].data, params=data[3].data)
+    return maps, data[4].data
 
 
-def save_maps(mapname, map_flux, map_errs):
+def save_maps(mapname, map_flux, map_errs, map_cont, map_params, maskcube):
     print(f"Saving {mapname}")
-    data = np.transpose((map_flux.T, map_errs.T))
-    np.save(mapname, data)
+    pri_hdu = fits.PrimaryHDU(map_flux)
+    img_hdu1 = fits.ImageHDU(map_errs)
+    img_hdu2 = fits.ImageHDU(map_cont)
+    img_hdu3 = fits.ImageHDU(map_params)
+    img_hdu4 = fits.ImageHDU(maskcube)
+    hdu = fits.HDUList([pri_hdu, img_hdu1, img_hdu2, img_hdu3, img_hdu4])
+    hdu.writeto(mapname, overwrite=True)
     return
 
 
 def get_mapname(dirc, name, line):
-    mapname = dirc + "maps/" + name.replace(".fits","") + f"_{line}.npy"
+    mapname = dirc + "maps/" + name.replace(".fits","") + f"_{line}.fits"
     return mapname
+
+
+def inverse(arr):
+    return (arr!=0)/(arr + (arr==0))
 
 
 if __name__ == "__main__":
     # Datacube
     dirc = "../../../IZw18_KCWI/final_cubes/"
     filename = "IZw18_BH2_newSensFunc.fits"
-    refit = True
+    refit = False
     line = "HIg"
     zem = (751.0 / 299792.458)
     hdus = fits.open(dirc+filename)

@@ -25,7 +25,7 @@ def newstart(covar, num):
     return Y_covar_fit
 
 
-def prepare_fitting(atom_prop, wave, spec, inc_emission=False, ncont=3):
+def prepare_fitting(atom_prop, wave, spec, inc_emission=False, ncont=2):
     param_info = []
     param_base = {'value': 0., 'fixed': 0, 'limited': [0, 0], 'limits': [0., 0.], 'step': 0}
     # Get some starting info from the input
@@ -156,22 +156,28 @@ def resid(p, fjac=None, wave=None, flux=None, errs=None, idx=None):
 
 def fit_one_cont(atom_prop, wave, spec, errs, mask, npoly=2, contsample=100, verbose=True):
     # Perform a fit
-    ww = np.where(mask == 0)
+    ww = np.where(mask == 1)
     if ww[0].size <= 5:
-        return None, None
+        return None, None, None, None
     fitspec = spec[ww]
     fiterrs = errs[ww]
     fitwave = wave[ww]
 
-    pinit, param_info, idx = prepare_fitting(atom_prop, wave, spec, ncont=npoly)
+    # Initialise the fitting
+    pinit, param_info, idx = prepare_fitting(atom_prop, fitwave, fitspec, ncont=npoly)
     # Now tell the fitting program what we called our variables
     fa = {'wave': fitwave, 'flux': fitspec, 'errs': fiterrs, 'idx': idx}
 
     if verbose: print("Fitting continuum")
     m = mpfit.mpfit(resid, pinit, parinfo=param_info, functkw=fa, quiet=True)
 
+    # Make the emission mask
+    emis_gpm = np.zeros(wave.size)
+    emis_gpm[np.where((wave >= np.min(fitwave)) & (wave <= np.max(fitwave)))] = 1
+    emis_gpm -= mask
+
     # Subtract the continuum and then sum everything above zero
-    wdiff = np.append(wave[1] - wave[0], np.diff(wave)) * mask  # Fold in the mask here to save computation in the loop
+    wdiff = np.append(wave[1] - wave[0], np.diff(wave)) * emis_gpm  # Fold in the mask here to save computation in the loop
     tmp_sum = 0.0
     try:
         if verbose: print("Sampling continuum")
@@ -189,13 +195,17 @@ def fit_one_cont(atom_prop, wave, spec, errs, mask, npoly=2, contsample=100, ver
         scale = 2
     if verbose: print("Calculating flux and error")
     # Calculate the best values
-    cont = full_model(m.params, wave, idx)
-    specnew = spec - cont
+    contabs = full_model(m.params, wave, idx)
+    specnew = spec - contabs
+    # Now get just the continuum value
+    cpar, _, _ = extract_params(m.params, idx)
+    cont = func_cont(cpar, wave)
+    cont_val = cont[np.argmax(spec)]  # Pick the continuum where the flux is maximum
     # Integrate over the masked regions (the mask is included in wdiff)
     sum_flux = np.sum(specnew * wdiff)
     # Add in the continuum error
     sum_err = scale * np.sqrt(np.sum((errs * wdiff) ** 2) + np.std(tmp_sum) ** 2)
-    return sum_flux, sum_err
+    return sum_flux, sum_err, cont_val, m.params
 
 
 def robust_stats(arr):

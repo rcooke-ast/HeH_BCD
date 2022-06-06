@@ -508,12 +508,11 @@ class CubeFitter:
                     self.operations('m', axisID, event)
                 elif self._end != self._start:
                     # The mouse button was dragged
-                    if axisID == 0:
-                        if self._start > self._end:
-                            tmp = self._start
-                            self._start = self._end
-                            self._end = tmp
-                        self.update_regions()
+                    if self._start > self._end:
+                        tmp = self._start
+                        self._start = self._end
+                        self._end = tmp
+                    self.update_regions()
             elif axisID in [AXFLUXMAP, AXWHITELIGHT]:
                 self._coord = self.get_coord_under_point(event)
                 # Update the spectrum that is being plotted
@@ -601,6 +600,9 @@ class CubeFitter:
         elif key == 'f':
             self.perform_fit()
             self.replot()
+        elif key == 'l':
+            self.maps, self.maskcube = load_maps(self.map_name)
+            self.replot()
         elif key == 'm':
             self._end = self.get_ind_under_point(event)
             self.replot()
@@ -611,7 +613,7 @@ class CubeFitter:
             else:
                 plt.close()
         elif key == 's':
-            save_maps(self.map_name, self.maps['flux'], self.maps['errs'], self.maps['cont'], self.maps['params'])
+            save_maps(self.map_name, self.maps['flux'], self.maps['errs'], self.maps['cont'], self.maps['params'], self.maskcube)
         elif key == 'y':
             self.toggle_yscale()
             self.replot()
@@ -637,40 +639,18 @@ class CubeFitter:
     def perform_fit(self):
         """Perform a fit to the current data inside the fit regions
         """
-        # Define the minimum distance between lines (in pixels)
-        mindist = 4
-        # Get the selected regions
-        ww = np.where(self._fitregions == 1)
-        xfit = self.curr_wave.copy()[ww]
-        yfit = self.specdata.copy()[ww]
-        from scipy.optimize import curve_fit
-        # Make sure there are enough pixels for the fit
-        npix = len(xfit)
-        if npix <= 3:
-            return
-        # Some starting parameters
-        ampl = np.max(yfit)
-        mean = sum(xfit * yfit) / sum(yfit)
-        sigma = sum(yfit * (xfit - mean) ** 2) / sum(yfit)
-        # Perform a gaussian fit
-        gaus = lambda x, a, x0, sigma: a * np.exp(-(x - x0) ** 2 / (2 * sigma ** 2))
-        popt, pcov = curve_fit(gaus, xfit, yfit, p0=[ampl, mean, sigma])
-        print(ampl, mean, sigma, popt[1])
-        # Get the new detection
-        new_detn = popt[1]
-        # Check that the detection doesn't already exist
-        cls_line = np.min(np.abs(self._detns - new_detn))
-        if cls_line > mindist:
-            detns = np.append(self._detns, new_detn)
-            arsrt = np.argsort(detns)
-            self._detns = detns[arsrt]
-            self._detnsy = self.get_ann_ypos()  # Get the y locations of the annotations
-            self._lineids = np.append(self._lineids, 0)[arsrt]
-            self._lineflg = np.append(self._lineflg, 0)[arsrt]  # Flags: 0=no ID, 1=user ID, 2=auto ID, 3=flag reject
+        flxsum, errsum, contval, pars = fitting.fit_one_cont(self._atomprop, self.curr_wave, self.curr_flux, self.curr_err, self._fitregions, contsample=100, verbose=False)
+        if flxsum is None:
+            # Something failed.
+            self.update_infobox(message="Fit failed...", yesno=False)
         else:
-            self.update_infobox("New detection is <{0:d} pixels of a detection - ignoring".format(mindist))
-        # Reset the fit regions
-        self._fitregions = np.zeros_like(self._fitregions)
+            self.update_infobox(message="Fit successful...", yesno=False)
+            self.maps['flux'][self._idx, self._idy] = flxsum
+            self.maps['errs'][self._idx, self._idy] = errsum
+            self.maps['cont'][self._idx, self._idy] = contval
+            self.maps['params'][:, self._idx, self._idy] = pars
+            # Now update the spectrum being shown
+            self.update_spectrum()
         return
 
     def update_infobox(self, message="Press '?' to list the available options",
@@ -817,6 +797,7 @@ def grow_mask(msk):
     return newmsk
 
 def load_maps(mapname):
+    print(f"Loading {mapname}")
     data = fits.open(mapname)
     maps = dict(flux=data[0].data, errs=data[1].data, cont=data[2].data, params=data[3].data)
     return maps, data[4].data

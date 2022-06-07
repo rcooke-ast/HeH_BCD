@@ -48,7 +48,7 @@ def prepare_fitting(atom_prop, wave, spec, inc_emission=False, ncont=2):
 
     # Set up the absorption
     idx = np.append(idx, 1 * np.ones(6))
-    p0a = np.array([14.0, zabs, 500.0, atom_prop['wave'], atom_prop['fval'], atom_prop['lGamma']])
+    p0a = np.array([14.5, zabs, 300.0, atom_prop['wave'], atom_prop['fval'], atom_prop['lGamma']])
     for i in range(len(p0a)):
         param_info.append(copy.deepcopy(param_base))
         param_info[cntr + i]['value'] = p0a[i]

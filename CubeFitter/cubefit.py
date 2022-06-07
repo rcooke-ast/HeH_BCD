@@ -34,6 +34,7 @@ operations = dict({'cursor': "Select lines (LMB click)\n" +
                    'f' : "Perform a fit",
                    'l' : "Reload the current map",
                    'm' : "Select a line",
+                   'p' : "Print parameters of the current fit to the command line",
                    's' : "Save the current map",
                    'y' : "Toggle the y-axis scale between logarithmic and linear",
                    '+/-' : "Raise/Lower the order of the fitting polynomial"
@@ -46,6 +47,8 @@ AXZOOM = 2
 AXINFO = 3
 AXFLUXMAP = 4
 AXWHITELIGHT = 5
+AXCOMPLETE = 6
+
 
 class CubeFitter:
     """
@@ -82,6 +85,8 @@ class CubeFitter:
         self.image = specim['im']#.get_data()
         self.wlimage = specim['imwl']
         self.complete = specim['imcomp']
+        self._imxarr = np.arange(self.maps['complete'].shape[1])
+        self._imyarr = np.arange(self.maps['complete'].shape[0])
         self.pt_map = specim['pt_map']
         self.pt_wl = specim['pt_wl']
         self.pt_comp = specim['pt_comp']
@@ -152,14 +157,14 @@ class CubeFitter:
         # Get the details of the line to be fitted
         atom_prop = GetAtomProp(line)
         waveobs = atom_prop['wave']*(1+zem)
-        delwave = 7.0
+        delwave = 15.0
 
         # Make a whitelight image, and the initial
         whitelight = np.sum(datcube, axis=0)/np.sum(sigcube == 0, axis=0)
         flx_map = np.zeros_like(whitelight)
         err_map = np.zeros_like(whitelight)
         cnt_map = np.zeros_like(whitelight)
-        comp_map = np.zeros_like(whitelight)
+        comp_map = np.ones_like(whitelight)
         par_map = None
 
         mapname = get_mapname(dirc, fname, line)
@@ -176,6 +181,7 @@ class CubeFitter:
                     flx_map[xx, yy] = flxsum
                     err_map[xx, yy] = errsum
                     cnt_map[xx, yy] = contval
+                    comp_map[xx, yy] = 0
                     if par_map is None:
                         par_map = np.zeros((pars.size, flx_map.shape[0], flx_map.shape[1]))
                     par_map[:, xx, yy] = pars
@@ -221,26 +227,26 @@ class CubeFitter:
         xarr = np.arange(whitelight.shape[1])
         yarr = np.arange(whitelight.shape[0])
         axmap = fig.add_axes([0.65, .5, .2, .2*16/9])
-        im = NonUniformImage(axmap, interpolation='nearest', cmap=cm.inferno)
+        im = NonUniformImage(axmap, interpolation='nearest', origin='lower', cmap=cm.inferno)
         im.set_data(xarr, yarr, all_maps['flux'])
         im.set_clim(vmin=0, vmax=30.0)
-        im.set_extent((0, xarr.size, 0, yarr.size))
+        im.set_extent((0, xarr.size-1, 0, yarr.size-1))
         mappt = axmap.scatter([idx], [idy], marker='x', color='b')
 
         # Add a whitelight image
         axwl = fig.add_axes([0.65, .1, .2, .2*16/9])
-        imwl = NonUniformImage(axwl, interpolation='nearest', cmap=cm.inferno)
+        imwl = NonUniformImage(axwl, interpolation='nearest', origin='lower', cmap=cm.inferno)
         imwl.set_data(xarr, yarr, whitelight)
         imwl.set_clim(vmin=0, vmax=np.max(whitelight))
-        imwl.set_extent((0, xarr.size, 0, yarr.size))
+        imwl.set_extent((0, xarr.size-1, 0, yarr.size-1))
         wlpt = axwl.scatter([idx], [idy], marker='x', color='b')
 
-        # Add a whitelight image
+        # Add a completeness image
         axcomp = fig.add_axes([0.86, .6, .13, .13*16/9])
-        imcomp = NonUniformImage(axcomp, interpolation='nearest', cmap=cm.bwr_r)
+        imcomp = NonUniformImage(axcomp, interpolation='nearest', origin='lower', cmap=cm.bwr_r)
         imcomp.set_data(xarr, yarr, comp_map)
         imcomp.set_clim(vmin=0, vmax=1)
-        imcomp.set_extent((0, xarr.size, 0, yarr.size))
+        imcomp.set_extent((0, xarr.size-1, 0, yarr.size-1))
         comppt = axcomp.scatter([idx], [idy], marker='x', color='y')
 
         # Add two residual fitting axes
@@ -429,7 +435,7 @@ class CubeFitter:
         elif dirn == 'right': newx += 1
         elif dirn == 'up': newy += 1
         elif dirn == 'down': newy -= 1
-        return [np.clip(newx,0,self._nx), np.clip(newy,0,self._ny)]
+        return [np.clip(newx,0,self._nx-1), np.clip(newy,0,self._ny-1)]
 
     def get_axisID(self, event):
         """Get the ID of the axis where an event has occurred
@@ -452,6 +458,8 @@ class CubeFitter:
             return AXFLUXMAP
         elif event.inaxes == self.axes['fwl']:
             return AXWHITELIGHT
+        elif event.inaxes == self.axes['fcomp']:
+            return AXCOMPLETE
         return None
 
     def button_press_callback(self, event):
@@ -521,7 +529,7 @@ class CubeFitter:
                         self._start = self._end
                         self._end = tmp
                     self.update_regions()
-            elif axisID in [AXFLUXMAP, AXWHITELIGHT]:
+            elif axisID in [AXFLUXMAP, AXWHITELIGHT, AXCOMPLETE]:
                 self._coord = self.get_coord_under_point(event)
                 # Update the spectrum that is being plotted
                 self.update_spectrum()
@@ -597,6 +605,7 @@ class CubeFitter:
         elif key == 'c':
             # Toggle that the current spaxel is complete
             self.maps['complete'][self._idx, self._idy] = 1-self.maps['complete'][self._idx, self._idy]
+            self.complete.set_data(self._imxarr, self._imyarr, self.maps['complete'])
             self.replot()
         elif key == 'f':
             self.perform_fit()
@@ -607,6 +616,8 @@ class CubeFitter:
         elif key == 'm':
             self._end = self.get_ind_under_point(event)
             self.replot()
+        elif key == 'p':
+            print(self.maps['params'][:, self._idx, self._idy])
         elif key == 'q':
             if self._changes:
                 self.update_infobox(message="WARNING: There are unsaved changes!!\nPress q again to exit", yesno=False)
@@ -689,8 +700,8 @@ class CubeFitter:
     def update_spectrum(self):
         """Update the regions used to fit Gaussian
         """
-        self._idx = self._nx-1-self._coord[0]
-        self._idy = self._ny-1-self._coord[1]
+        self._idx = self._coord[1]#self._nx-1-self._coord[0]
+        self._idy = self._coord[0]#self._ny-1-self._coord[1]
         # Update the current flux and error
         self.curr_flux = self.datacube[:, self._idx, self._idy]
         self.curr_err = self.sigcube[:, self._idx, self._idy]
@@ -710,6 +721,8 @@ class CubeFitter:
         fmad = 1.4826*np.median(np.abs(self.curr_flux[ww]-fmed))
         self.axes['main'].set_ylim(0, fmax)
         self.axes['fit'].set_ylim(0, min(fmed+3*fmad, fmax))
+        # Update the images
+        self.image.set_data(self._imxarr, self._imyarr, self.maps['flux'])
         # Update the location of the scatter points in the images
         self.pt_map.set_offsets(np.c_[self._coord[0], self._coord[1]])
         self.pt_wl.set_offsets(np.c_[self._coord[0], self._coord[1]])

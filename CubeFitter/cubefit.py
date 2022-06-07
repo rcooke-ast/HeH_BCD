@@ -30,16 +30,11 @@ operations = dict({'cursor': "Select lines (LMB click)\n" +
                    'right' : "Advance the line list slider to the right by one",
                    'p' : "Toggle pan/zoom with the cursor",
                    'q' : "Close Identify window and continue PypeIt reduction",
-                   'a' : "Automatically identify lines using current solution",
-                   'c' : "Clear automatically identified lines",
-                   'd' : "Delete all line identifications (start from scratch)",
-                   'f' : "Fit the wavelength solution",
-                   'i' : "Include an undetected line to the detected line list\n" +
-                         "         First select fitting pixels (LMB drag = add, RMB drag = remove)\n" +
-                         "         Then press 'i' to perform a fit." +
-                         "         NOTE: ghost solution must be turned off to select fit regions.",
+                   'c' : "Mark spaxel as complete",
+                   'f' : "Perform a fit",
+                   'l' : "Reload the current map",
                    'm' : "Select a line",
-                   'r' : "Refit a line",
+                   's' : "Save the current map",
                    'y' : "Toggle the y-axis scale between logarithmic and linear",
                    '+/-' : "Raise/Lower the order of the fitting polynomial"
                    })
@@ -58,7 +53,7 @@ class CubeFitter:
     """
 
     def __init__(self, canvas, axes, specim, wave, datacube, sigcube, mskcube, all_maps, map_name, idx, idy, atomprop, y_log=True):
-        """Controls for the Identify task in PypeIt.
+        """A hacked script to (re)fit emission lines in a datacube manually, and estimate the total emission line flux.
 
         The main goal of this routine is to interactively identify arc lines
         to be used for wavelength calibration.
@@ -86,8 +81,10 @@ class CubeFitter:
         self.resid = specim['resid']#.get_ydata()
         self.image = specim['im']#.get_data()
         self.wlimage = specim['imwl']
+        self.complete = specim['imcomp']
         self.pt_map = specim['pt_map']
         self.pt_wl = specim['pt_wl']
+        self.pt_comp = specim['pt_comp']
         self.curr_wave = wave
         self.curr_flux = datacube[:, idx, idy]
         self.curr_err = sigcube[:, idx, idy]
@@ -162,6 +159,7 @@ class CubeFitter:
         flx_map = np.zeros_like(whitelight)
         err_map = np.zeros_like(whitelight)
         cnt_map = np.zeros_like(whitelight)
+        comp_map = np.zeros_like(whitelight)
         par_map = None
 
         mapname = get_mapname(dirc, fname, line)
@@ -181,7 +179,7 @@ class CubeFitter:
                     if par_map is None:
                         par_map = np.zeros((pars.size, flx_map.shape[0], flx_map.shape[1]))
                     par_map[:, xx, yy] = pars
-            save_maps(mapname, flx_map, err_map, cnt_map, par_map, mskcube)
+            save_maps(mapname, flx_map, err_map, cnt_map, comp_map, par_map, mskcube)
         # Load the saved maps to check it worked, and put it in the correct format
         all_maps, mskcube = load_maps(mapname)
 
@@ -237,6 +235,14 @@ class CubeFitter:
         imwl.set_extent((0, xarr.size, 0, yarr.size))
         wlpt = axwl.scatter([idx], [idy], marker='x', color='b')
 
+        # Add a whitelight image
+        axcomp = fig.add_axes([0.86, .6, .13, .13*16/9])
+        imcomp = NonUniformImage(axcomp, interpolation='nearest', cmap=cm.bwr_r)
+        imcomp.set_data(xarr, yarr, comp_map)
+        imcomp.set_clim(vmin=0, vmax=1)
+        imcomp.set_extent((0, xarr.size, 0, yarr.size))
+        comppt = axcomp.scatter([idx], [idy], marker='x', color='y')
+
         # Add two residual fitting axes
         axfit = fig.add_axes([0.05, .22, .55, 0.25])
         axfit.sharex(ax)
@@ -267,8 +273,8 @@ class CubeFitter:
         axinfo.set_xlim((0, 1))
         axinfo.set_ylim((0, 1))
 
-        axes = dict(main=ax, fit=axfit, resid=axres, info=axinfo, fmap=axmap, fwl=axwl)
-        specim = dict(im=im, imwl=imwl, spec=spec, speczoom=speczoom, model=specfit, resid=resid, pt_map=mappt, pt_wl=wlpt)
+        axes = dict(main=ax, fit=axfit, resid=axres, info=axinfo, fmap=axmap, fwl=axwl, fcomp=axcomp)
+        specim = dict(im=im, imwl=imwl, imcomp=imcomp, spec=spec, speczoom=speczoom, model=specfit, resid=resid, pt_map=mappt, pt_wl=wlpt, pt_comp=comppt)
         # Initialise the identify window and display to screen
         fig.canvas.set_window_title('CubeFitter')
         fitter = CubeFitter(fig.canvas, axes, specim, wave, datcube, sigcube, mskcube, all_maps, mapname, idx, idy, atom_prop, y_log=y_log)
@@ -366,6 +372,8 @@ class CubeFitter:
         self.axes['fmap'].draw_artist(self.pt_map)
         self.axes['fwl'].draw_artist(self.wlimage)
         self.axes['fwl'].draw_artist(self.pt_wl)
+        self.axes['fcomp'].draw_artist(self.complete)
+        self.axes['fcomp'].draw_artist(self.pt_comp)
 
     def draw_fitregions(self, transMain, transZoom, transResid):
         """Refresh the fit regions
@@ -491,7 +499,7 @@ class CubeFitter:
                 answer = "n"
             else:
                 return
-            self.operations(answer, -1)
+            self.operations(answer, -1, None)
             self.update_infobox(default=True)
             return
         elif self._respreq[0]:
@@ -558,7 +566,6 @@ class CubeFitter:
                 self.update_infobox(message="WARNING: There are unsaved changes!!\nPress q again to exit", yesno=False)
                 self._qconf = True
             else:
-                msgs.bug("Need to change this to kill and return the results to PypeIt")
                 plt.close()
         elif self._qconf:
             self.update_infobox(default=True)
@@ -574,8 +581,7 @@ class CubeFitter:
                 # Deal with the response
                 if self._respreq[1] == "write":
                     # First remove the old file, and save the new one
-                    msgs.work("Not implemented yet!")
-                    self.write()
+                    self.operations('s',-1,None)
                 else:
                     return
             # Reset the info box
@@ -589,13 +595,8 @@ class CubeFitter:
             # Update the spectrum that is being plotted
             self.update_spectrum()
         elif key == 'c':
-            wclr = np.where((self._lineflg == 2) | (self._lineflg == 3))
-            self._lineflg[wclr] = 0
-            self.replot()
-        elif key == 'd':
-            self._lineflg *= 0
-            self._lineids *= 0.0
-            self._fitdict['coeff'] = None
+            # Toggle that the current spaxel is complete
+            self.maps['complete'][self._idx, self._idy] = 1-self.maps['complete'][self._idx, self._idy]
             self.replot()
         elif key == 'f':
             self.perform_fit()
@@ -613,7 +614,7 @@ class CubeFitter:
             else:
                 plt.close()
         elif key == 's':
-            save_maps(self.map_name, self.maps['flux'], self.maps['errs'], self.maps['cont'], self.maps['params'], self.maskcube)
+            save_maps(self.map_name, self.maps['flux'], self.maps['errs'], self.maps['cont'], self.maps['complete'], self.maps['params'], self.maskcube)
         elif key == 'y':
             self.toggle_yscale()
             self.replot()
@@ -712,6 +713,7 @@ class CubeFitter:
         # Update the location of the scatter points in the images
         self.pt_map.set_offsets(np.c_[self._coord[0], self._coord[1]])
         self.pt_wl.set_offsets(np.c_[self._coord[0], self._coord[1]])
+        self.pt_comp.set_offsets(np.c_[self._coord[0], self._coord[1]])
         # Replot the data
         self.replot()
 
@@ -799,18 +801,19 @@ def grow_mask(msk):
 def load_maps(mapname):
     print(f"Loading {mapname}")
     data = fits.open(mapname)
-    maps = dict(flux=data[0].data, errs=data[1].data, cont=data[2].data, params=data[3].data)
-    return maps, data[4].data
+    maps = dict(flux=data[0].data, errs=data[1].data, cont=data[2].data, complete=data[3].data, params=data[4].data)
+    return maps, data[5].data
 
 
-def save_maps(mapname, map_flux, map_errs, map_cont, map_params, maskcube):
+def save_maps(mapname, map_flux, map_errs, map_cont, map_comp, map_params, maskcube):
     print(f"Saving {mapname}")
     pri_hdu = fits.PrimaryHDU(map_flux)
     img_hdu1 = fits.ImageHDU(map_errs)
     img_hdu2 = fits.ImageHDU(map_cont)
-    img_hdu3 = fits.ImageHDU(map_params)
-    img_hdu4 = fits.ImageHDU(maskcube)
-    hdu = fits.HDUList([pri_hdu, img_hdu1, img_hdu2, img_hdu3, img_hdu4])
+    img_hdu3 = fits.ImageHDU(map_comp)
+    img_hdu4 = fits.ImageHDU(map_params)
+    img_hdu5 = fits.ImageHDU(maskcube)
+    hdu = fits.HDUList([pri_hdu, img_hdu1, img_hdu2, img_hdu3, img_hdu4, img_hdu5])
     hdu.writeto(mapname, overwrite=True)
     return
 

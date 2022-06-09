@@ -25,7 +25,7 @@ def newstart(covar, num):
     return Y_covar_fit
 
 
-def prepare_fitting(atom_prop, wave, spec, inc_emission=False, ncont=2):
+def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, ncont=2, p0c=None, p0a=None, p0e=None):
     param_info = []
     param_base = {'value': 0., 'fixed': 0, 'limited': [0, 0], 'limits': [0., 0.], 'step': 0}
     # Get some starting info from the input
@@ -37,8 +37,9 @@ def prepare_fitting(atom_prop, wave, spec, inc_emission=False, ncont=2):
 
     # Set up the continuum
     idx = np.zeros(ncont)
-    p0c = np.zeros(ncont)
-    p0c[-1] = cont
+    if p0c is None:
+        p0c = np.zeros(ncont)
+        p0c[-1] = cont
     cntr = 0
     for i in range(ncont):
         param_info.append(copy.deepcopy(param_base))
@@ -47,33 +48,37 @@ def prepare_fitting(atom_prop, wave, spec, inc_emission=False, ncont=2):
     pinit = np.copy(p0c)
 
     # Set up the absorption
-    idx = np.append(idx, 1 * np.ones(6))
-    p0a = np.array([14.5, zabs, 300.0, atom_prop['wave'], atom_prop['fval'], atom_prop['lGamma']])
-    for i in range(len(p0a)):
-        param_info.append(copy.deepcopy(param_base))
-        param_info[cntr + i]['value'] = p0a[i]
-        if i == 0:
-            param_info[cntr + i]['limited'] = [1, 0]
-            param_info[cntr + i]['limits'] = [0, 0]
-        elif i == 1:
-            pass
-        elif i == 2:
-            param_info[cntr + i]['limited'] = [1, 0]
-            param_info[cntr + i]['limits'] = [1, 0]
-        elif i == 3:
-            param_info[cntr + i]['fixed'] = 1
-        elif i == 4:
-            param_info[cntr + i]['fixed'] = 1
-        elif i == 5:
-            param_info[cntr + i]['limited'] = [1, 0]
-            param_info[cntr + i]['limits'] = [0, 0]
-    cntr += len(p0a)
-    pinit = np.append(pinit, p0a.copy())
+    if include_ab:
+        idx = np.append(idx, 1 * np.ones(6))
+        if p0a is None:
+            p0a = np.array([14.5, zabs, 300.0, atom_prop['wave'], atom_prop['fval'], atom_prop['lGamma']])
+        for i in range(len(p0a)):
+            param_info.append(copy.deepcopy(param_base))
+            param_info[cntr + i]['value'] = p0a[i]
+            if i == 0:
+                param_info[cntr + i]['limited'] = [1, 0]
+                param_info[cntr + i]['limits'] = [0, 0]
+            elif i == 1:
+                pass
+            elif i == 2:
+                param_info[cntr + i]['limited'] = [1, 0]
+                param_info[cntr + i]['limits'] = [1, 0]
+            elif i == 3:
+                param_info[cntr + i]['fixed'] = 1
+            elif i == 4:
+                param_info[cntr + i]['fixed'] = 1
+            elif i == 5:
+                param_info[cntr + i]['fixed'] = 1  # Fix the damping constant for now - probably not needed.
+                param_info[cntr + i]['limited'] = [1, 0]
+                param_info[cntr + i]['limits'] = [0, 0]
+        cntr += len(p0a)
+        pinit = np.append(pinit, p0a.copy())
 
     # Set up the emission
-    if inc_emission:
+    if include_em:
         idx = np.append(idx, 2 * np.ones(3))
-        p0e = np.array([ampl, wcen, sigm])
+        if p0e is None:
+            p0e = np.array([ampl, wcen, sigm])
         for i in range(len(p0e)):
             param_info.append(copy.deepcopy(param_base))
             param_info[cntr + i]['value'] = p0e[i]
@@ -133,7 +138,9 @@ def full_model(p, wave, idx):
     # First make the stellar continuum
     cont = func_cont(cp, wave)
     # Now model the stellar absorption as a voigt profile
-    absp = func_voigt(ap, wave)
+    absp = 1
+    if np.any(idx == 1):
+        absp = func_voigt(ap, wave)
     # Obtain a model of a Gaussian
     emis = 0.0
     if np.any(idx == 2):
@@ -154,7 +161,10 @@ def resid(p, fjac=None, wave=None, flux=None, errs=None, idx=None):
     return [status, resid]
 
 
-def fit_one_cont(atom_prop, wave, spec, errs, mask, npoly=2, contsample=100, verbose=True):
+def fit_one_cont(atom_prop, wave, spec, errs, mask,
+                 npoly=2, contsample=100, verbose=True,
+                 p0c=None, p0a=None, p0e=None,
+                 include_em=False, include_ab=True):
     # Perform a fit
     ww = np.where(mask == 1)
     if ww[0].size <= 5:
@@ -164,7 +174,9 @@ def fit_one_cont(atom_prop, wave, spec, errs, mask, npoly=2, contsample=100, ver
     fitwave = wave[ww]
 
     # Initialise the fitting
-    pinit, param_info, idx = prepare_fitting(atom_prop, fitwave, fitspec, ncont=npoly)
+    pinit, param_info, idx = prepare_fitting(atom_prop, fitwave, fitspec,
+                                             ncont=npoly, p0c=p0c, p0a=p0a, p0e=p0e,
+                                             include_ab=include_ab, include_em=include_em)
     # Now tell the fitting program what we called our variables
     fa = {'wave': fitwave, 'flux': fitspec, 'errs': fiterrs, 'idx': idx}
 

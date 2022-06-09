@@ -33,10 +33,12 @@ operations = dict({'cursor': "Select lines (LMB click)\n" +
                    'c' : "Mark spaxel as complete",
                    'f' : "Perform a fit",
                    'l' : "Reload the current map",
-                   'm' : "Select a line",
-                   'p' : "Print parameters of the current fit to the command line",
+                   'm' : "Set the fit parameters",
+                   'n' : "Reset the m cycle to zero (i.e. start a new fit)",
+                   'o' : "Print parameters of the current fit to the command line",
                    's' : "Save the current map",
                    'y' : "Toggle the y-axis scale between logarithmic and linear",
+                   'z' : "Zap a spaxel - delete its model parameters...",
                    '+/-' : "Raise/Lower the order of the fitting polynomial"
                    })
 
@@ -131,11 +133,17 @@ class CubeFitter:
         self._coord = [idx, idy]
         self._fitr, self._fitrzoom, self._fitrresid = None, None, None  # Matplotlib shaded fit region (for refitting lines)
         self._fitregions = self.maskcube[:, idx, idy]  # Mask of the pixels to be included in a fit
+        self._mcycle = 0
+        self._modpar = np.zeros(6)
+        self._p0c, self._p0a, self._p0e = None, None, None
         self._addsub = 0   # Adding a region (1) or removing (0)
         self._msedown = False  # Is the mouse button being held down (i.e. dragged)
         self._respreq = [False, None]  # Does the user need to provide a response before any other operation will be permitted? Once the user responds, the second element of this array provides the action to be performed.
         self._qconf = False  # Confirm quit message
         self._changes = False
+
+        # Setup slider for the linelist
+        self.image_scale_init()
 
         # Draw the spectrum
         self.replot()
@@ -244,7 +252,7 @@ class CubeFitter:
         # Add a completeness image
         axcomp = fig.add_axes([0.86, .6, .13, .13*16/9])
         imcomp = NonUniformImage(axcomp, interpolation='nearest', origin='lower', cmap=cm.bwr_r)
-        imcomp.set_data(xarr, yarr, comp_map)
+        imcomp.set_data(xarr, yarr, all_maps['complete'])
         imcomp.set_clim(vmin=0, vmax=1)
         imcomp.set_extent((0, xarr.size-1, 0, yarr.size-1))
         comppt = axcomp.scatter([idx], [idy], marker='x', color='y')
@@ -289,6 +297,16 @@ class CubeFitter:
 
         # Now return the results
         return fitter
+
+    def image_scale_init(self):
+        """Initialise the linelist Slider (used to assign a line to a detection)
+        """
+        axcolor = 'lightgoldenrodyellow'
+        # Slider
+        self.axl = plt.axes([0.15, 0.87, 0.7, 0.04], facecolor=axcolor)
+        self._slideis = Slider(self.axl, "Image scale", -2, 3, valinit=1, valstep=0.01)
+        self._slideis.valtext.set_visible(False)
+        self._slideis.on_changed(self.update_image_scale)
 
     def print_help(self):
         """Print the keys and descriptions that can be used for Identification
@@ -406,7 +424,7 @@ class CubeFitter:
         self._fitrresid = self.axes['resid'].fill_between(self.curr_wave, 0, 1, where=regwhr, facecolor='green',
                                                     alpha=0.5, transform=transResid)
 
-    def get_ind_under_point(self, event):
+    def get_xidx_under_point(self, event):
         """Get the index of the line closest to the cursor
 
         Args:
@@ -479,7 +497,7 @@ class CubeFitter:
         if self.get_axisID(event) in [AXMAIN, AXZOOM]:
             self._msedown = True
         axisID = self.get_axisID(event)
-        self._start = self.get_ind_under_point(event)
+        self._start = self.get_xidx_under_point(event)
         self._startdata = event.xdata
 
     def motion_notify_event(self, event):
@@ -518,7 +536,7 @@ class CubeFitter:
         # Draw an actor
         if axisID is not None:
             if axisID in [AXMAIN, AXZOOM]:
-                self._end = self.get_ind_under_point(event)
+                self._end = self.get_xidx_under_point(event)
                 if self._end == self._start:
                     # The mouse button was pressed (not dragged)
                     self.operations('m', axisID, event)
@@ -614,9 +632,17 @@ class CubeFitter:
             self.maps, self.maskcube = load_maps(self.map_name)
             self.replot()
         elif key == 'm':
-            self._end = self.get_ind_under_point(event)
-            self.replot()
-        elif key == 'p':
+            self._modpar[2 * self._mcycle] = event.xdata
+            self._modpar[2 * self._mcycle + 1] = event.ydata
+            self._mcycle += 1
+            self._mcycle = self._mcycle % 3
+            # Check if all mod params are set
+            if self._mcycle == 0:
+                self.update_fitpar()
+                self.replot()
+        elif key == 'n':
+            self._mcycle = 0
+        elif key == 'o':
             print(self.maps['params'][:, self._idx, self._idy])
         elif key == 'q':
             if self._changes:
@@ -629,6 +655,12 @@ class CubeFitter:
         elif key == 'y':
             self.toggle_yscale()
             self.replot()
+        elif key == 'z':
+            self.maps['flux'][self._idx, self._idy] = 0
+            self.maps['errs'][self._idx, self._idy] = 0
+            self.maps['cont'][self._idx, self._idy] = 0
+            self.maps['params'][:, self._idx, self._idy] = 0
+            self.operations('c', -1, event) # Mark as complete, and this step also replots
         elif key == '+':
             if self._fitdict["polyorder"] < 10:
                 self._fitdict["polyorder"] += 1
@@ -651,7 +683,15 @@ class CubeFitter:
     def perform_fit(self):
         """Perform a fit to the current data inside the fit regions
         """
-        flxsum, errsum, contval, pars = fitting.fit_one_cont(self._atomprop, self.curr_wave, self.curr_flux, self.curr_err, self._fitregions, contsample=100, verbose=False)
+        include_ab = True
+        include_em = False
+        if self._p0a is not None:
+            if self._p0a[0] == 0:
+                include_ab = False
+        # Perform the fit
+        flxsum, errsum, contval, pars = fitting.fit_one_cont(self._atomprop, self.curr_wave, self.curr_flux, self.curr_err, self._fitregions,
+                                                             contsample=100, verbose=False, p0c=self._p0c, p0a=self._p0a, p0e=self._p0e,
+                                                             include_ab=include_ab, include_em=include_em)
         if flxsum is None:
             # Something failed.
             self.update_infobox(message="Fit failed...", yesno=False)
@@ -660,7 +700,14 @@ class CubeFitter:
             self.maps['flux'][self._idx, self._idy] = flxsum
             self.maps['errs'][self._idx, self._idy] = errsum
             self.maps['cont'][self._idx, self._idy] = contval
-            self.maps['params'][:, self._idx, self._idy] = pars
+            if include_ab:
+                self.maps['params'][:, self._idx, self._idy] = pars
+            else:
+                if self._p0a is not None:
+                    self.maps['params'][:, self._idx, self._idy] = np.append(pars, self._p0a)
+                else:
+                    tmp = np.array([0.0, 0.0, 300.0, self._atomprop['wave'], self._atomprop['fval'], 0.0])
+                    self.maps['params'][:, self._idx, self._idy] = np.append(pars, tmp)
             # Now update the spectrum being shown
             self.update_spectrum()
         return
@@ -697,6 +744,40 @@ class CubeFitter:
         """
         self._fitregions[self._start:self._end] = self._addsub
 
+    def update_fitpar(self):
+        """Update the regions used to fit Gaussian
+        """
+        # Determine the starting parameters to use for the fit
+        # Start with the continuum
+        xv = np.array([self._modpar[0], self._modpar[2]])
+        yv = np.array([self._modpar[1], self._modpar[3]])
+        minx, maxx = np.min(xv), np.max(xv)
+        xr = (xv-minx)/(maxx-minx)
+        self._p0c = np.polyfit(xr, yv, 1)
+        # Now set up the absorption
+        zabs = (self._modpar[4]/self._atomprop['wave']) - 1
+        bval = 366.0
+        xr = (self._modpar[4]-minx)/(maxx-minx)
+        contval = np.polyval(self._p0c, xr)
+        depth = contval-self._modpar[5]
+        if depth <= 0:
+            logcold = 0
+        else:
+            wv = self._atomprop['wave'] * 1.0e-8
+            bl = bval * wv / 2.99792458E5
+            cns = wv * wv * self._atomprop['fval'] / (bl * 2.002134602291006E12)
+            logcold = np.log10(-np.log(self._modpar[5]/contval)/cns)
+        self._p0a = np.array([logcold, zabs, bval, self._atomprop['wave'], self._atomprop['fval'], 0.0])
+        # No emission parameters
+        self._p0e = None
+        # Update the model in the plotting window
+        pinit, _, index = fitting.prepare_fitting(self._atomprop, self.curr_wave, self.datacube[:, self._idx, self._idy],
+                                                  p0c=self._p0c, p0a=self._p0a, p0e=self._p0e)
+        model = fitting.full_model(pinit, self.curr_wave, index)
+        self.model.set_ydata(model)
+        self.resid.set_ydata((self.curr_flux-model)*inverse(self.curr_err))
+        self.replot()
+
     def update_spectrum(self):
         """Update the regions used to fit Gaussian
         """
@@ -727,9 +808,18 @@ class CubeFitter:
         self.pt_map.set_offsets(np.c_[self._coord[0], self._coord[1]])
         self.pt_wl.set_offsets(np.c_[self._coord[0], self._coord[1]])
         self.pt_comp.set_offsets(np.c_[self._coord[0], self._coord[1]])
+        # Reset the fit parameters
+        self._p0c, self._p0a, self._p0e = None, None, None
+        self._mcycle = 0
         # Replot the data
         self.replot()
 
+    def update_image_scale(self, value):
+        # Update the image scales
+        self.image.set_clim(vmin=0, vmax=10.0**value)
+        self.wlimage.set_clim(vmin=0, vmax=10.0**value)
+        # Replot the data
+        self.replot()
 
 # TODO
 def calc_total_flux(atom_prop, wave, flx, err, msk, contsample=100):
@@ -844,6 +934,7 @@ if __name__ == "__main__":
     # Datacube
     dirc = "../../../IZw18_KCWI/final_cubes/"
     filename = "IZw18_BH2_newSensFunc.fits"
+    #filename = "IZw18_B.fits"
     refit = False
     line = "HIg"
     zem = (751.0 / 299792.458)

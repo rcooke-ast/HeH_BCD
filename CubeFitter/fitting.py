@@ -25,7 +25,7 @@ def newstart(covar, num):
     return Y_covar_fit
 
 
-def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, ncont=2, p0c=None, p0a=None, p0e=None):
+def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, npoly=2, p0c=None, p0a=None, p0e=None):
     param_info = []
     param_base = {'value': 0., 'fixed': 0, 'limited': [0, 0], 'limits': [0., 0.], 'step': 0}
     # Get some starting info from the input
@@ -36,12 +36,12 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, nc
     sigm = 2 * (wave[1] - wave[0])
 
     # Set up the continuum
-    idx = np.zeros(ncont)
+    idx = np.zeros(npoly)
     if p0c is None:
-        p0c = np.zeros(ncont)
+        p0c = np.zeros(npoly)
         p0c[-1] = cont
     cntr = 0
-    for i in range(ncont):
+    for i in range(npoly):
         param_info.append(copy.deepcopy(param_base))
         param_info[cntr + i]['value'] = p0c[i]
     cntr += len(p0c)
@@ -51,7 +51,7 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, nc
     if include_ab:
         idx = np.append(idx, 1 * np.ones(6))
         if p0a is None:
-            p0a = np.array([14.5, zabs, 300.0, atom_prop['wave'], atom_prop['fval'], atom_prop['lGamma']])
+            p0a = np.array([14.8, zabs, 400.0, atom_prop['wave'], atom_prop['fval'], atom_prop['lGamma']])
         for i in range(len(p0a)):
             param_info.append(copy.deepcopy(param_base))
             param_info[cntr + i]['value'] = p0a[i]
@@ -175,7 +175,7 @@ def fit_one_cont(atom_prop, wave, spec, errs, mask,
 
     # Initialise the fitting
     pinit, param_info, idx = prepare_fitting(atom_prop, fitwave, fitspec,
-                                             ncont=npoly, p0c=p0c, p0a=p0a, p0e=p0e,
+                                             npoly=npoly, p0c=p0c, p0a=p0a, p0e=p0e,
                                              include_ab=include_ab, include_em=include_em)
     # Now tell the fitting program what we called our variables
     fa = {'wave': fitwave, 'flux': fitspec, 'errs': fiterrs, 'idx': idx}

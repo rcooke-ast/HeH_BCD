@@ -166,7 +166,7 @@ def fit_one_cont(atom_prop, wave, spec, errs, mask,
                  p0c=None, p0a=None, p0e=None,
                  include_em=False, include_ab=True):
     # Perform a fit
-    ww = np.where(mask == 1)
+    ww = np.where((mask == 1) & (errs != 0.0) & (spec != 0.0))
     if ww[0].size <= 5:
         return None, None, None, None
     fitspec = spec[ww]

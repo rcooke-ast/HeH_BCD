@@ -630,6 +630,8 @@ class CubeFitter:
             self.maps['complete'][self._idx, self._idy] = 1-self.maps['complete'][self._idx, self._idy]
             self.complete.set_data(self._imxarr, self._imyarr, self.maps['complete'])
             self.replot()
+        elif key == 'd':
+            self.FitConstant()
         elif key == 'f':
             # First perform the fit
             self.perform_fit()
@@ -838,6 +840,23 @@ class CubeFitter:
         # Replot the data
         self.replot()
 
+    def FitConstant(self):
+        # Find the left and right regions
+        ww = np.where(self.maskcube[:, self._idx, self._idy]==1)
+        wi = ww[0]
+        ll = np.min(self.curr_wave[ww])
+        rr = np.max(self.curr_wave[ww])
+        mnflx = np.median(self.curr_flux[ww])
+        self._modpar[0] = ll
+        self._modpar[1] = mnflx
+        self._modpar[2] = rr
+        self._modpar[3] = mnflx
+        self._modpar[4] = 0.5*(ll+rr)
+        self._modpar[5] = mnflx*2
+        self.update_fitpar()
+        # Now fit it
+        self.perform_fit()
+
     def SetBetterStartParams(self):
         # Find the left and right regions
         ww = np.where(self.maskcube[:, self._idx, self._idy]==1)
@@ -857,13 +876,7 @@ class CubeFitter:
         xtra = int(0.3*(wi[-1]-wi[0]))
         newmask[wi[0]-xtra:wi[0]+1] = 1
         newmask[wi[-1]:wi[-1]+xtra] = 1
-        #embed()
         self.maskcube[:, self._idx, self._idy] = newmask.copy()
-        print("--------")
-        print(ll, rr, mnflx, xtra)
-        print(self._modpar)
-        print(wi)
-        print(wi[0]-xtra, wi[0]+1, wi[-1], wi[-1]+xtra)
         # Now fit it
         self.perform_fit()
 
@@ -986,8 +999,8 @@ if __name__ == "__main__":
     refit = False
     include_ab = True
     npoly = 3  # Order of polynomial used to fit the data
-    line = "HId"
-    #line = "HeI4026"
+    #line = "HId"
+    line = "HeI4026"
     zem = (717.0 / 299792.458)
     hdus = fits.open(dirc+filename)
     wcs = WCS(hdus[1].header)

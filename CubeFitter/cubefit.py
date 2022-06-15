@@ -178,14 +178,51 @@ class CubeFitter:
         comp_map = np.ones_like(whitelight)
         par_map = None
 
+        # # TODO :: REMOVE -- Load up the Hd maps as starting parameters for the Hg maps
+        # all_maps, mskcube = load_maps(get_mapname(dirc, fname, "HId"))
+        # all_maps['params'][6, :, :] = 4341.691
+        # all_maps['params'][7, :, :] = 4.4694e-02
+        # mskcube = np.roll(mskcube, 2081, axis=0)
+        # for xx in range(datcube.shape[1]):
+        #     for yy in range(datcube.shape[2]):
+        #         amtmp = np.where(mskcube[:,xx,yy]==1)[0]
+        #         if amtmp.size != 0:
+        #             mskcube[amtmp[-1]-20:,xx,yy] = 0
+
+        # TODO :: REMOVE -- This was a fix to convert the fits from legendre to polyonomial
+        # mapname = get_mapname(dirc, fname, line)
+        # all_maps, mskcube = load_maps(mapname)
+        # for xx in range(datcube.shape[1]):
+        #     for yy in range(datcube.shape[2]):
+        #         flx, err, msk = datcube[:, xx, yy], sigcube[:, xx, yy], mskcube[:, xx, yy]
+        #         ww = np.where((msk == 1) & (err != 0.0) & (flx != 0.0))
+        #         if ww[0].size <= 5:
+        #             continue
+        #         fitwave = wave[ww]
+        #         wred = (fitwave - fitwave[0]) / (fitwave[-1] - fitwave[0])
+        #         cont = np.polyval(all_maps['params'][:npoly, xx, yy], wred)
+        #         newpar = np.polyfit(fitwave, cont, npoly-1)
+        #         all_maps['params'][:npoly, xx, yy] = newpar
+        # save_maps(mapname, all_maps['flux'], all_maps['errs'], all_maps['cont'], all_maps['complete'], all_maps['params'], mskcube)
+
         mapname = get_mapname(dirc, fname, line)
         if refit:
-            mskcube = make_mask(wave, datcube, waveobs, delwave)
+            #mskcube = make_mask(wave, datcube, waveobs, delwave)
             for xx in range(datcube.shape[1]):
                 print(f"fitting row {xx+1}/{datcube.shape[1]}")
                 for yy in range(datcube.shape[2]):
+                    p0c, p0a = None, None
+                    if False:
+                        # Refitting the data
+                        if all_maps['params'][0, xx, yy] == 0:
+                            continue
+                        # Update mskcube
+                        #ww = np.where((wave>4315)&(wave<4340))[0]
+                        #mskcube[ww, xx, yy] = 1
+                        p0c = all_maps['params'][:npoly, xx, yy]
+                        p0a = all_maps['params'][npoly:, xx, yy]
                     flx, err, msk = datcube[:, xx, yy], sigcube[:, xx, yy], mskcube[:, xx, yy]
-                    flxsum, errsum, contval, pars = fitting.fit_one_cont(atom_prop, wave, flx, err, msk, npoly=npoly, contsample=100, verbose=False, include_ab=include_ab)
+                    flxsum, errsum, contval, pars = fitting.fit_one_cont(atom_prop, wave, flx, err, msk, npoly=npoly, contsample=100, verbose=False, include_ab=include_ab, p0c=p0c, p0a=p0a)
                     if flxsum is None:
                         # Something failed.
                         continue
@@ -199,6 +236,7 @@ class CubeFitter:
             save_maps(mapname, flx_map, err_map, cnt_map, comp_map, par_map, mskcube)
         # Load the saved maps to check it worked, and put it in the correct format
         all_maps, mskcube = load_maps(mapname)
+        print("Spectra left to fit:", int(np.sum(1-all_maps['complete'])))
 
         # Set the starting location, and generate the model at this location
         idx, idy = datcube.shape[1]//2, datcube.shape[2]//2
@@ -632,6 +670,8 @@ class CubeFitter:
             self.replot()
         elif key == 'd':
             self.FitConstant()
+            self.update_spectrum()
+            self.replot()
         elif key == 'f':
             # First perform the fit
             self.perform_fit()
@@ -670,7 +710,9 @@ class CubeFitter:
             self.maps['errs'][self._idx, self._idy] = 0
             self.maps['cont'][self._idx, self._idy] = 0
             self.maps['params'][:, self._idx, self._idy] = 0
-            self.operations('c', -1, event) # Mark as complete, and this step also replots
+            self.maskcube[:, self._idx, self._idy] = 0
+            if self.maps['complete'][self._idx, self._idy] == 1:
+                self.operations('c', -1, event) # Mark as complete, and this step also replots
         elif key == '+':
             if self._fitdict["polyorder"] < 10:
                 self._fitdict["polyorder"] += 1
@@ -689,15 +731,22 @@ class CubeFitter:
                 self.update_infobox(message="Polynomial order must be >= 1", yesno=False)
         self.canvas.draw()
 
-    # TODO
-    def perform_fit(self):
+    def perform_fit(self, include_ab=None):
         """Perform a fit to the current data inside the fit regions
         """
         include_em = False
+        if include_ab is None:
+            include_ab = self._include_ab
+        self._p0c = self.maps['params'][:self._npoly, self._idx, self._idy]
+        if include_ab:
+            if self._p0a is None:
+                self._p0a = self.maps['params'][self._npoly:, self._idx, self._idy]
+        else:
+            self._p0a = np.array([0.0, 0.0, 300.0, self._atomprop['wave'], self._atomprop['fval'], 0.0])
         # Perform the fit
         flxsum, errsum, contval, pars = fitting.fit_one_cont(self._atomprop, self.curr_wave, self.curr_flux, self.curr_err, self._fitregions,
                                                              contsample=100, verbose=False, p0c=self._p0c, p0a=self._p0a, p0e=self._p0e,
-                                                             include_ab=self._include_ab, npoly=npoly, include_em=include_em)
+                                                             include_ab=self._include_ab, npoly=self._npoly, include_em=include_em)
         if flxsum is None:
             # Something failed.
             self.update_infobox(message="Fit failed...", yesno=False)
@@ -706,20 +755,16 @@ class CubeFitter:
             self.maps['flux'][self._idx, self._idy] = flxsum
             self.maps['errs'][self._idx, self._idy] = errsum
             self.maps['cont'][self._idx, self._idy] = contval
-            try:
+            if pars.size == self.maps['params'].shape[0]:
                 self.maps['params'][:, self._idx, self._idy] = pars
-            except:
-                try:
-                    self.maps['params'][:, self._idx, self._idy] = np.append(pars, self._p0a)
-                except:
-                    try:
-                        tmp = np.array([0.0, 0.0, 300.0, self._atomprop['wave'], self._atomprop['fval'], 0.0])
-                        self.maps['params'][:, self._idx, self._idy] = np.append(pars, tmp)
-                    except:
-                        self.update_infobox(message="Fit Failed...", yesno=False)
-                        self.maps['flux'][self._idx, self._idy] = 0
-                        self.maps['errs'][self._idx, self._idy] = 0
-                        self.maps['cont'][self._idx, self._idy] = 0
+            elif not include_ab:
+                tmp = np.array([0.0, 0.0, 300.0, self._atomprop['wave'], self._atomprop['fval'], 0.0])
+                self.maps['params'][:, self._idx, self._idy] = np.append(pars, tmp.copy())
+            else:
+                self.update_infobox(message="Fit Failed...", yesno=False)
+                self.maps['flux'][self._idx, self._idy] = 0
+                self.maps['errs'][self._idx, self._idy] = 0
+                self.maps['cont'][self._idx, self._idy] = 0
         return
 
     def update_infobox(self, message="Press '?' to list the available options",
@@ -852,10 +897,10 @@ class CubeFitter:
         self._modpar[2] = rr
         self._modpar[3] = mnflx
         self._modpar[4] = 0.5*(ll+rr)
-        self._modpar[5] = mnflx*2
+        self._modpar[5] = mnflx + 100
         self.update_fitpar()
         # Now fit it
-        self.perform_fit()
+        self.perform_fit(include_ab=False)
 
     def SetBetterStartParams(self):
         # Find the left and right regions
@@ -880,16 +925,6 @@ class CubeFitter:
         # Now fit it
         self.perform_fit()
 
-
-
-# TODO
-def calc_total_flux(atom_prop, wave, flx, err, msk, contsample=100):
-    """
-    Perform a fit to the continuum, and then calculate the total emission
-    line flux, including continuum uncertainties.
-    """
-
-    return
 
 def make_mask(wave, datcube, waveobs, delwave):
     print("Generating mask")
@@ -979,6 +1014,7 @@ def save_maps(mapname, map_flux, map_errs, map_cont, map_comp, map_params, maskc
     img_hdu5 = fits.ImageHDU(maskcube)
     hdu = fits.HDUList([pri_hdu, img_hdu1, img_hdu2, img_hdu3, img_hdu4, img_hdu5])
     hdu.writeto(mapname, overwrite=True)
+    print("Spectra left to fit:", int(np.sum(1 - map_comp)))
     return
 
 
@@ -997,10 +1033,9 @@ if __name__ == "__main__":
     filename = "IZw18_BH2_newSensFunc.fits"
     #filename = "IZw18_B.fits"
     refit = False
-    include_ab = True
-    npoly = 3  # Order of polynomial used to fit the data
-    #line = "HId"
-    line = "HeI4026"
+    #line, include_ab, npoly = "HIg", True, 3
+    #line, include_ab, npoly = "HId", True, 3
+    line, include_ab, npoly = "HeI4026", False, 3
     zem = (717.0 / 299792.458)
     hdus = fits.open(dirc+filename)
     wcs = WCS(hdus[1].header)

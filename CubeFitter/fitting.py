@@ -36,7 +36,7 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
     sigm = 2 * (wave[1] - wave[0])
 
     # Set up the continuum
-    idx = np.zeros(npoly)
+    idx = np.zeros(npoly, dtype=int)
     if p0c is None:
         p0c = np.zeros(npoly)
         p0c[-1] = cont
@@ -49,7 +49,7 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
 
     # Set up the absorption
     if include_ab:
-        idx = np.append(idx, 1 * np.ones(6))
+        idx = np.append(idx, 1 * np.ones(6, dtype=int))
         if p0a is None:
             p0a = np.array([14.8, zabs, 400.0, atom_prop['wave'], atom_prop['fval'], atom_prop['lGamma']])
         for i in range(len(p0a)):
@@ -58,11 +58,13 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
             if i == 0:
                 param_info[cntr + i]['limited'] = [1, 0]
                 param_info[cntr + i]['limits'] = [0, 0]
+                if p0a[0] == 0: param_info[cntr + i]['fixed'] = 1
             elif i == 1:
-                pass
+                if p0a[0] == 0: param_info[cntr + i]['fixed'] = 1
             elif i == 2:
                 param_info[cntr + i]['limited'] = [1, 0]
                 param_info[cntr + i]['limits'] = [1, 0]
+                if p0a[0] == 0: param_info[cntr + i]['fixed'] = 1
             elif i == 3:
                 param_info[cntr + i]['fixed'] = 1
             elif i == 4:
@@ -76,7 +78,7 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
 
     # Set up the emission
     if include_em:
-        idx = np.append(idx, 2 * np.ones(3))
+        idx = np.append(idx, 2 * np.ones(3, dtype=int))
         if p0e is None:
             p0e = np.array([ampl, wcen, sigm])
         for i in range(len(p0e)):
@@ -93,7 +95,7 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
         cntr += len(p0e)
         pinit = np.append(pinit, p0e.copy())
     # Return everything we need
-    return pinit, param_info, idx
+    return pinit, param_info, idx.astype(int)
 
 
 def func_voigt(par, wavein):
@@ -118,10 +120,8 @@ def func_gauss_oned(p, x):
 
 
 def func_cont(p, x):
-    # register the wavelength between 0 and 1
-    wred = (x-x[0])/(x[-1]-x[0])
     # First make the stellar continuum
-    cont = np.polyval(p, wred)
+    cont = np.polyval(p, x)
     return cont
 
 

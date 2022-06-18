@@ -10,7 +10,7 @@ from cubefit import get_mapname, mask_one
 from IPython import embed
 
 # Set the properties of the extraction/fit
-line, npoly, xl, xr = "HIg", 3, 100, 0   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
+line, grating, npoly, xl, xr = "HIg", "BH2", 3, 100, 0   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
 #line, npoly = "HId", 3
 #line, npoly = "HeI4026", 3
 linear = True  # Use a linear fit to the continuum regions?
@@ -126,12 +126,13 @@ if plotit:
     plt.plot(out_wave[final_mask == 0], final_spec[final_mask == 0], 'ro')
     plt.plot(out_wave, final_spec, 'k-', drawstyle='steps-mid')
     plt.show()
-p0a = np.array([14.0, out_wave[np.argmax(final_spec)]/atom_prop['wave']-1, 100.0, atom_prop['wave'], atom_prop['fval'], 13])
+#p0a = np.array([14.0, out_wave[np.argmax(final_spec)]/atom_prop['wave']-1, 100.0, atom_prop['wave'], atom_prop['fval'], 13])
+p0a = np.array([15000.0, out_wave[np.argmax(final_spec)]/atom_prop['wave']-1, 30, atom_prop['wave'], atom_prop['fval'], 0])
 # Perform the fit
-flxsum, errsum, contval, pars = fitting.fit_one_cont(atom_prop, out_wave, final_spec, final_spec_err, mask,
-                                                     npoly=npoly, contsample=100, verbose=True,
-                                                     p0c=None, p0a=p0a, p0e=None,
-                                                     include_em=False, include_ab=True)
+flxsum, errsum, contval, pars = fitting.fit_stellar_abs(atom_prop, out_wave, final_spec, final_spec_err, final_mask,
+                                                        npoly=npoly, grating=grating, contsample=100, verbose=True,
+                                                        p0c=None, p0a=p0a, p0e=None,
+                                                        include_em=False, include_ab=True)
 index = np.ones(npoly+6, dtype=int)
 index[:npoly] = 0
 model = fitting.full_model(np.append(pars[:npoly],p0a), out_wave, index)

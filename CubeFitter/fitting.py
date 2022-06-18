@@ -1,7 +1,9 @@
 import numpy as np
 import mpfit_single as mpfit
 from scipy.special import wofz
+from scipy.interpolate import RegularGridInterpolator
 import copy
+from IPython import embed
 
 
 def newstart(covar, num):
@@ -25,7 +27,7 @@ def newstart(covar, num):
     return Y_covar_fit
 
 
-def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, npoly=2, p0c=None, p0a=None, p0e=None):
+def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, npoly=2, p0c=None, p0a=None, p0e=None, stellar=False):
     param_info = []
     param_base = {'value': 0., 'fixed': 0, 'limited': [0, 0], 'limits': [0., 0.], 'step': 0}
     # Get some starting info from the input
@@ -51,19 +53,30 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
     if include_ab:
         idx = np.append(idx, 1 * np.ones(6, dtype=int))
         if p0a is None:
-            p0a = np.array([14.8, zabs, 400.0, atom_prop['wave'], atom_prop['fval'], atom_prop['lGamma']])
+            if stellar:
+                p0a = np.array([15000, zabs, 30, atom_prop['wave'], atom_prop['fval'], atom_prop['lGamma']])
+            else:
+                p0a = np.array([14.8, zabs, 400.0, atom_prop['wave'], atom_prop['fval'], atom_prop['lGamma']])
         for i in range(len(p0a)):
             param_info.append(copy.deepcopy(param_base))
             param_info[cntr + i]['value'] = p0a[i]
             if i == 0:
-                param_info[cntr + i]['limited'] = [1, 0]
-                param_info[cntr + i]['limits'] = [0, 0]
+                if stellar:
+                    param_info[cntr + i]['limited'] = [1, 1]
+                    param_info[cntr + i]['limits'] = [3500, 30000]
+                else:
+                    param_info[cntr + i]['limited'] = [1, 0]
+                    param_info[cntr + i]['limits'] = [0, 0]
                 if p0a[0] == 0: param_info[cntr + i]['fixed'] = 1
             elif i == 1:
                 if p0a[0] == 0: param_info[cntr + i]['fixed'] = 1
             elif i == 2:
-                param_info[cntr + i]['limited'] = [1, 0]
-                param_info[cntr + i]['limits'] = [1, 0]
+                if stellar:
+                    param_info[cntr + i]['limited'] = [1, 1]
+                    param_info[cntr + i]['limits'] = [0, 50]
+                else:
+                    param_info[cntr + i]['limited'] = [1, 0]
+                    param_info[cntr + i]['limits'] = [1, 0]
                 if p0a[0] == 0: param_info[cntr + i]['fixed'] = 1
             elif i == 3:
                 param_info[cntr + i]['fixed'] = 1
@@ -113,6 +126,12 @@ def func_voigt(par, wavein):
     return np.exp(-1.0*tau)
 
 
+def func_stellarabs(par, wavein, mgrid):
+    tval = np.ones(wavein.size) * par[0]
+    gval = np.ones(wavein.size) * par[2]
+    return mgrid(np.column_stack((tval,gval,wavein/(1+par[1]))))
+
+
 def func_gauss_oned(p, x):
     amp, cen, sig = p[0], p[1], p[2]
     y = (amp/(sig*np.sqrt(2*np.pi))) * np.exp(-(x-cen)**2/(2.0*sig**2))
@@ -132,7 +151,7 @@ def extract_params(p, idx):
     return cp, ap, ep
 
 
-def full_model(p, wave, idx):
+def full_model(p, wave, idx, stellar=None):
     # Extract the parameters of the different functions
     cp, ap, ep = extract_params(p, idx)
     # First make the stellar continuum
@@ -140,7 +159,10 @@ def full_model(p, wave, idx):
     # Now model the stellar absorption as a voigt profile
     absp = 1
     if np.any(idx == 1):
-        absp = func_voigt(ap, wave)
+        if stellar is None:
+            absp = func_voigt(ap, wave)
+        else:
+            absp = func_stellarabs(ap, wave, stellar)
     # Obtain a model of a Gaussian
     emis = 0.0
     if np.any(idx == 2):
@@ -151,9 +173,9 @@ def full_model(p, wave, idx):
     return model
 
 
-def resid(p, fjac=None, wave=None, flux=None, errs=None, idx=None):
+def resid(p, fjac=None, wave=None, flux=None, errs=None, idx=None, stellar=None):
     # Calculate the model
-    model = full_model(p, wave, idx)
+    model = full_model(p, wave, idx, stellar=stellar)
     # Non-negative status value means MPFIT should
     # continue, negative means stop the calculation.
     status = 0
@@ -204,6 +226,7 @@ def fit_one_cont(atom_prop, wave, spec, errs, mask,
         scale = 1
     except:
         # Cont fit errors failed - just double the error, probably it's just noise.
+        print("ERROR calculating total flux and error")
         scale = 2
     if verbose: print("Calculating flux and error")
     # Calculate the best values
@@ -217,6 +240,81 @@ def fit_one_cont(atom_prop, wave, spec, errs, mask,
     sum_flux = np.sum(specnew * wdiff)
     # Add in the continuum error
     sum_err = scale * np.sqrt(np.sum((errs * wdiff) ** 2) + np.std(tmp_sum) ** 2)
+    return sum_flux, sum_err, cont_val, m.params
+
+
+def fit_stellar_abs(atom_prop, wave, spec, errs, mask, grating='BH2',
+                    npoly=2, contsample=100, verbose=True,
+                    p0c=None, p0a=None, p0e=None,
+                    include_em=False, include_ab=True):
+    # Perform a fit
+    ww = np.where((mask == 1) & (errs != 0.0) & (spec != 0.0))
+    if ww[0].size <= 5:
+        return None, None, None, None
+    fitspec = spec[ww]
+    fiterrs = errs[ww]
+    fitwave = wave[ww]
+
+    # Initialise the fitting
+    pinit, param_info, idx = prepare_fitting(atom_prop, fitwave, fitspec, stellar=True,
+                                             npoly=npoly, p0c=p0c, p0a=p0a, p0e=p0e,
+                                             include_ab=include_ab, include_em=include_em)
+
+    # Make the spline representation of the stellar absorption
+    tgrid = np.load("Bohlin2017_Tgrid.npy")
+    ggrid = np.load("Bohlin2017_Ggrid.npy")
+    wgrid = np.load(f"Bohlin2017_Wgrid_{grating}_{atom_prop['line']}.npy")
+    mgrid = np.load(f"Bohlin2017_Mgrid_{grating}_{atom_prop['line']}.npy")
+    abs_spl = RegularGridInterpolator((tgrid, ggrid, wgrid), mgrid)
+
+    # Now tell the fitting program what we called our variables
+    fa = {'wave': fitwave, 'flux': fitspec, 'errs': fiterrs, 'idx': idx, 'stellar':abs_spl}
+
+    if verbose: print("Fitting continuum and stellar absorption")
+    m = mpfit.mpfit(resid, pinit, parinfo=param_info, functkw=fa, quiet=False)
+
+    wg = np.where((wave>np.min(fitwave)) & (wave<np.max(fitwave)))
+    wavefin = wave[wg]
+    specfin = spec[wg]
+    errsfin = errs[wg]
+    # Make the emission mask
+    emis_gpm = np.zeros(wavefin.size)
+    emis_gpm[np.where((wavefin >= np.min(fitwave)) & (wavefin <= np.max(fitwave)))] = 1
+    emis_gpm -= mask[wg]
+
+    # Subtract the continuum and then sum everything above zero
+    wdiff = np.append(wavefin[1] - wavefin[0], np.diff(wavefin)) * emis_gpm  # Fold in the mask here to save computation in the loop
+    tmp_sum = 0.0
+    try:
+        if verbose: print("Sampling continuum")
+        tmp_sum = np.zeros(contsample)
+        ptb = np.append(newstart(m.covar, contsample), np.zeros((3,contsample)), axis=0)
+        contpars = (np.outer(m.params, np.ones(contsample)) + ptb)
+        for ss in range(contsample):
+            part = np.squeeze(np.asarray(contpars[:, ss]))
+            if (part[npoly]>np.min(tgrid)) and (part[npoly]<np.max(tgrid)) and \
+                (part[npoly+2]>np.min(ggrid)) and (part[npoly+2]<np.max(ggrid)):
+                cont = full_model(part, wavefin, idx, stellar=abs_spl)
+                specnew = specfin - cont
+                # Integrate over the masked region
+                tmp_sum[ss] = np.sum(specnew * wdiff)
+        scale = 1
+    except:
+        # Cont fit errors failed - just double the error, probably it's just noise.
+        print("ERROR calculating total flux and error")
+        scale = 2
+    if verbose: print("Calculating flux and error")
+    # Calculate the best values
+    contabs = full_model(m.params, wavefin, idx, stellar=abs_spl)
+    specnew = specfin - contabs
+    # Now get just the continuum value
+    cpar, _, _ = extract_params(m.params, idx)
+    cont = func_cont(cpar, wavefin)
+    cont_val = cont[np.argmax(specfin)]  # Pick the continuum where the flux is maximum
+    # Integrate over the masked regions (the mask is included in wdiff)
+    sum_flux = np.sum(specnew * wdiff)
+    # Add in the continuum error
+    sum_err = scale * np.sqrt(np.sum((errsfin * wdiff) ** 2) + np.std(tmp_sum[tmp_sum!=0]) ** 2)
     return sum_flux, sum_err, cont_val, m.params
 
 

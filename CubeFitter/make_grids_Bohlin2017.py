@@ -15,15 +15,47 @@ def get_resln(grating, slicer):
     print("Not implemented...")
     assert(False)
 
+def convolve(wav, flx, vfwhm):
+    """
+    Define the functional form of the model
+    --------------------------------------------------------
+    x  : array of wavelengths
+    y  : model flux array
+    p  : array of parameters for this model
+    --------------------------------------------------------
+    """
+    sigd = vfwhm / ( 2.99792458E5 * ( 2.0*np.sqrt(2.0*np.log(2.0)) ) )
+    ysize=flx.size
+    fsigd=6.0*sigd
+    dwav = 0.5 * (wav[2:] - wav[:-2]) / wav[1:-1]
+    dwav = np.append(np.append(dwav[0],dwav),dwav[-1])
+    df= int(np.min([np.int(np.ceil(fsigd/dwav).max()), ysize//2 - 1]))
+    yval = np.zeros(2*df+1)
+    yval[df:2*df+1] = (wav[df:2 * df + 1] / wav[df] - 1.0) / sigd
+    yval[:df] = (wav[:df] / wav[df] - 1.0) / sigd
+    gaus = np.exp(-0.5*yval*yval)
+    size = ysize + gaus.size - 1
+    fsize = 2 ** np.int(np.ceil(np.log2(size))) # Use this size for a more efficient computation
+    conv = np.fft.fft(flx, fsize)
+    conv *= np.fft.fft(gaus/gaus.sum(), fsize)
+    ret = np.fft.ifft(conv).real.copy()
+    del conv
+    return ret[df:df+ysize]
+
+
+# Set the path and grab the model files
 dirc = "/Users/rcooke/Work/Research/BBN/Yp/HIIregions/Software/BohlinStellarModels/metal_-1.50/"
 carbon_options = ["carbon_+0.00", "carbon_+0.25", "carbon_+0.50", "carbon_-0.25", "carbon_-0.50", "carbon_-0.75"]
 alpha_options = ["alpha_+0.00", "alpha_+0.25", "alpha_+0.50", "alpha_-0.25"]
 carbon = carbon_options[0]
 alpha = alpha_options[1]
-
 full_path = dirc + carbon + "/" + alpha + "/*"
 all_files = glob.glob(full_path)
-line, grating, slicer = "HIg", "BH2", "Small"
+
+# Set the transition parameters
+#line, delwave, grating, slicer = "HIg", 30, "BH2", "Small"
+#line, delwave, grating, slicer = "HId", 30, "BH2", "Small"
+line, delwave, grating, slicer = "HeI4026", 30, "BH2", "Small"
 
 resln = get_resln(grating, slicer)
 # Load some information
@@ -54,13 +86,20 @@ if True:
     plt.show()
 
 # Load the first file to determine number of spectral elements and relevant indices
-wmin, wmax =
-wave = np.loadtxt(all_files[0], unpack=True, use_cols=(0,))
-ww = np.where((wave>wmin) & (wave<wmax))
+wave = np.loadtxt(all_files[0], unpack=True, usecols=(0,))
+# Cut down the wavelength range to speed up the convolution
+wmin, wmax = atom_prop['wave']-2*delwave, atom_prop['wave']+2*delwave
+wcut = np.where((wave>wmin) & (wave<wmax))
+wavecut = wave[wcut]
+# Now select the wavelength range of interest to store in the grid
+wmin, wmax = atom_prop['wave']-delwave, atom_prop['wave']+delwave
+ww = np.where((wavecut>wmin) & (wavecut<wmax))
+np.save(f"Bohlin2017_Wgrid_{grating}_{line}.npy", wavecut[ww])
 # Output grid shape
 full_grid = np.ones((unq_temp.size, unq_grav.size, ww[0].size))
 # Load each grid, convolve
 for ff, fil in enumerate(all_files):
+    print(ff+1, "/", len(all_files))
     filn = os.path.basename(fil)
     try:
         this_temp = int(filn[14:19])  # >= 10,000 K
@@ -71,11 +110,14 @@ for ff, fil in enumerate(all_files):
     tidx = np.argmin(np.abs(unq_temp - this_temp))
     gidx = np.argmin(np.abs(unq_grav - this_grav))
     # Read in the data
-    wave, flux, cont = np.loadtxt(fil, unpack=True)
+    flux, cont = np.loadtxt(fil, unpack=True, usecols=(1,2))
     fnorm = flux/cont
     # Convolve the data
-    cnorm = convolve(, resln)
+    cnorm = convolve(wavecut, fnorm[wcut], resln)
+    # plt.plot(wavecut,fnorm[wcut], 'k-')
+    # plt.plot(wavecut, cnorm, 'r-')
+    # plt.show()
     # Extract the relevant bits of data for the interpolation
     full_grid[tidx, gidx, :] = cnorm[ww]
 
-np.save("Bohlin2017_FULLgrid.npy", full_grid)
+np.save(f"Bohlin2017_Mgrid_{grating}_{line}.npy", full_grid)

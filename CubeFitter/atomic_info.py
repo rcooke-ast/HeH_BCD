@@ -1,6 +1,6 @@
 
 def GetAtomProp(line):
-    prop = dict(wave=None, fval=None, lGamma=None, zabs=0.0)
+    prop = dict(line=line, wave=None, fval=None, lGamma=None, zabs=0.0)
     # H I lines
     if line == "HIb":
         prop['wave'], prop['fval'], prop['lGamma'] = 4862.691, 1.1938e-01, 1

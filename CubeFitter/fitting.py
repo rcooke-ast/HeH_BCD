@@ -67,9 +67,9 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
                 else:
                     param_info[cntr + i]['limited'] = [1, 0]
                     param_info[cntr + i]['limits'] = [0, 0]
-                if p0a[0] == 0: param_info[cntr + i]['fixed'] = 1
+                if p0a[0] in [0,2.19999997e+04]: param_info[cntr + i]['fixed'] = 1
             elif i == 1:
-                if p0a[0] == 0: param_info[cntr + i]['fixed'] = 1
+                if p0a[0] in [0,2.19999997e+04]: param_info[cntr + i]['fixed'] = 1
             elif i == 2:
                 if stellar:
                     param_info[cntr + i]['limited'] = [1, 1]
@@ -77,7 +77,7 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
                 else:
                     param_info[cntr + i]['limited'] = [1, 0]
                     param_info[cntr + i]['limits'] = [1, 0]
-                if p0a[0] == 0: param_info[cntr + i]['fixed'] = 1
+                if p0a[0] in [0,2.19999997e+04]: param_info[cntr + i]['fixed'] = 1
             elif i == 3:
                 param_info[cntr + i]['fixed'] = 1
             elif i == 4:
@@ -261,17 +261,13 @@ def fit_stellar_abs(atom_prop, wave, spec, errs, mask, grating='BH2',
                                              include_ab=include_ab, include_em=include_em)
 
     # Make the spline representation of the stellar absorption
-    tgrid = np.load("Bohlin2017_Tgrid.npy")
-    ggrid = np.load("Bohlin2017_Ggrid.npy")
-    wgrid = np.load(f"Bohlin2017_Wgrid_{grating}_{atom_prop['line']}.npy")
-    mgrid = np.load(f"Bohlin2017_Mgrid_{grating}_{atom_prop['line']}.npy")
-    abs_spl = RegularGridInterpolator((tgrid, ggrid, wgrid), mgrid)
+    tgrid, ggrid, wgrid, abs_spl = get_bohlin_spline(grating, atom_prop['line'])
 
     # Now tell the fitting program what we called our variables
     fa = {'wave': fitwave, 'flux': fitspec, 'errs': fiterrs, 'idx': idx, 'stellar':abs_spl}
 
     if verbose: print("Fitting continuum and stellar absorption")
-    m = mpfit.mpfit(resid, pinit, parinfo=param_info, functkw=fa, quiet=False)
+    m = mpfit.mpfit(resid, pinit, parinfo=param_info, functkw=fa, quiet=True)
 
     wg = np.where((wave>np.min(fitwave)) & (wave<np.max(fitwave)))
     wavefin = wave[wg]
@@ -288,7 +284,7 @@ def fit_stellar_abs(atom_prop, wave, spec, errs, mask, grating='BH2',
     try:
         if verbose: print("Sampling continuum")
         tmp_sum = np.zeros(contsample)
-        ptb = np.append(newstart(m.covar, contsample), np.zeros((3,contsample)), axis=0)
+        ptb = np.append(newstart(m.covar, contsample), np.zeros((6,contsample)), axis=0)
         contpars = (np.outer(m.params, np.ones(contsample)) + ptb)
         for ss in range(contsample):
             part = np.squeeze(np.asarray(contpars[:, ss]))
@@ -317,6 +313,14 @@ def fit_stellar_abs(atom_prop, wave, spec, errs, mask, grating='BH2',
     sum_err = scale * np.sqrt(np.sum((errsfin * wdiff) ** 2) + np.std(tmp_sum[tmp_sum!=0]) ** 2)
     return sum_flux, sum_err, cont_val, m.params
 
+
+def get_bohlin_spline(grating, line):
+    tgrid = np.load("Bohlin2017_Tgrid.npy")
+    ggrid = np.load("Bohlin2017_Ggrid.npy")
+    wgrid = np.load(f"Bohlin2017_Wgrid_{grating}_{line}.npy")
+    mgrid = np.load(f"Bohlin2017_Mgrid_{grating}_{line}.npy")
+    abs_spl = RegularGridInterpolator((tgrid, ggrid, wgrid), mgrid)
+    return tgrid, ggrid, wgrid, abs_spl
 
 def robust_stats(arr):
     med = np.median(arr)

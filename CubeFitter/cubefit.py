@@ -57,7 +57,7 @@ class CubeFitter:
     GUI to interactively fit emission and absorption lines in a datacube.
     """
 
-    def __init__(self, canvas, axes, specim, wave, datacube, sigcube, mskcube, all_maps, map_name, idx, idy, atomprop, include_ab=True, y_log=True, npoly=2):
+    def __init__(self, canvas, axes, specim, wave, datacube, sigcube, mskcube, all_maps, map_name, idx, idy, atomprop, grating, include_ab=True, y_log=True, npoly=2):
         """A hacked script to (re)fit emission lines in a datacube manually, and estimate the total emission line flux.
 
         The main goal of this routine is to interactively identify arc lines
@@ -89,6 +89,7 @@ class CubeFitter:
         self.complete = specim['imcomp']
         self._imxarr = np.arange(self.maps['complete'].shape[1])
         self._imyarr = np.arange(self.maps['complete'].shape[0])
+        self._vmap = np.load(dirc + "maps/IZw18_BH2_newSensFunc_HIg_vmap.npy")
         self.pt_map = specim['pt_map']
         self.pt_wl = specim['pt_wl']
         self.pt_comp = specim['pt_comp']
@@ -97,10 +98,13 @@ class CubeFitter:
         self.curr_err = sigcube[:, idx, idy]
         self.y_log = y_log
         self._atomprop = atomprop
+        self._grating = grating
         # datacube
         self.datacube = datacube
         self.sigcube = sigcube
         self.maskcube = mskcube
+        # Spline infomation
+        self._tgrid, self._ggrid, self._wgrid, self._abs_spl = fitting.get_bohlin_spline(self._grating, self._atomprop['line'])
         # Fitting properties
         self._fitdict = dict(model=None)
         # Unset some of the matplotlib keymaps
@@ -151,7 +155,7 @@ class CubeFitter:
         self.replot()
 
     @classmethod
-    def initialise(cls, datcube, sigcube, wave, line, zem, dirc, fname, refit=False, include_ab=False, npoly=2, y_log=False):
+    def initialise(cls, datcube, sigcube, wave, line, zem, dirc, fname, grating, refit=False, include_ab=False, npoly=2, y_log=False):
         """Initialise the 'CubeFitter' window for manual fitting of continuum near emission lines
 
         Parameters
@@ -192,6 +196,7 @@ class CubeFitter:
         # TODO :: REMOVE -- This was a fix to convert the fits from legendre to polyonomial
         # mapname = get_mapname(dirc, fname, line)
         # all_maps, mskcube = load_maps(mapname)
+        # vmap = np.load(dirc + "maps/IZw18_BH2_newSensFunc_HIg_vmap.npy")
         # for xx in range(datcube.shape[1]):
         #     for yy in range(datcube.shape[2]):
         #         flx, err, msk = datcube[:, xx, yy], sigcube[:, xx, yy], mskcube[:, xx, yy]
@@ -217,12 +222,15 @@ class CubeFitter:
                         if all_maps['params'][0, xx, yy] == 0:
                             continue
                         # Update mskcube
-                        #ww = np.where((wave>4315)&(wave<4340))[0]
-                        #mskcube[ww, xx, yy] = 1
+                        ww = np.where((wave>4315)&(wave<4340))[0]
+                        mskcube[ww, xx, yy] = 1
                         p0c = all_maps['params'][:npoly, xx, yy]
                         p0a = all_maps['params'][npoly:, xx, yy]
+                        # TODO :: The ffollowing lines contain the best-fit values of HIg
+                        zstl = (1+vmap[xx,yy]) * (1+2.39532608e-03) - 1
+                        p0a[0:3] = np.array([2.19999997e+04, zstl, 3.75950693e+01])
                     flx, err, msk = datcube[:, xx, yy], sigcube[:, xx, yy], mskcube[:, xx, yy]
-                    flxsum, errsum, contval, pars = fitting.fit_one_cont(atom_prop, wave, flx, err, msk, npoly=npoly, contsample=100, verbose=False, include_ab=include_ab, p0c=p0c, p0a=p0a)
+                    flxsum, errsum, contval, pars = fitting.fit_stellar_abs(atom_prop, wave, flx, err, msk, grating=grating, npoly=npoly, contsample=100, verbose=False, include_ab=include_ab, p0c=p0c, p0a=p0a)
                     if flxsum is None:
                         # Something failed.
                         continue
@@ -332,7 +340,7 @@ class CubeFitter:
         specim = dict(im=im, imwl=imwl, imcomp=imcomp, spec=spec, speczoom=speczoom, model=specfit, resid=resid, pt_map=mappt, pt_wl=wlpt, pt_comp=comppt)
         # Initialise the identify window and display to screen
         fig.canvas.set_window_title('CubeFitter')
-        fitter = CubeFitter(fig.canvas, axes, specim, wave, datcube, sigcube, mskcube, all_maps, mapname, idx, idy, atom_prop, include_ab=include_ab, npoly=npoly, y_log=y_log)
+        fitter = CubeFitter(fig.canvas, axes, specim, wave, datcube, sigcube, mskcube, all_maps, mapname, idx, idy, atom_prop, grating, include_ab=include_ab, npoly=npoly, y_log=y_log)
 
         plt.show()
 
@@ -738,15 +746,18 @@ class CubeFitter:
         if include_ab is None:
             include_ab = self._include_ab
         self._p0c = self.maps['params'][:self._npoly, self._idx, self._idy]
-        if include_ab:
-            if self._p0a is None:
-                self._p0a = self.maps['params'][self._npoly:, self._idx, self._idy]
-        else:
-            self._p0a = np.array([0.0, 0.0, 300.0, self._atomprop['wave'], self._atomprop['fval'], 0.0])
+        # if include_ab:
+        #     if self._p0a is None:
+        #         self._p0a = self.maps['params'][self._npoly:, self._idx, self._idy]
+        #         # 2.19999997e+04, 2.39532608e-03, 3.75950693e+01
+        # else:
+        #     self._p0a = np.array([0.0, 0.0, 300.0, self._atomprop['wave'], self._atomprop['fval'], 0.0])
+        self._p0a = self.maps['params'][self._npoly:, self._idx, self._idy]
+        self._p0a[0:3] = np.array([2.19999997e+04, 2.39532608e-03, 3.75950693e+01])
         # Perform the fit
-        flxsum, errsum, contval, pars = fitting.fit_one_cont(self._atomprop, self.curr_wave, self.curr_flux, self.curr_err, self._fitregions,
+        flxsum, errsum, contval, pars = fitting.fit_stellar_abs(self._atomprop, self.curr_wave, self.curr_flux, self.curr_err, self._fitregions,
                                                              contsample=100, verbose=False, p0c=self._p0c, p0a=self._p0a, p0e=self._p0e,
-                                                             include_ab=self._include_ab, npoly=self._npoly, include_em=include_em)
+                                                             include_ab=self._include_ab, npoly=self._npoly, include_em=include_em, grating=self._grating)
         if flxsum is None:
             # Something failed.
             self.update_infobox(message="Fit failed...", yesno=False)
@@ -853,7 +864,12 @@ class CubeFitter:
         #     self.SetBetterStartParams()
         self._fitregions = self.maskcube[:, self._idx, self._idy]
         _, _, index = fitting.prepare_fitting(self._atomprop, self.curr_wave, self.datacube[:, self._idx, self._idy], npoly=self._npoly, include_ab=self._include_ab)
-        model = fitting.full_model(self.maps['params'][:, self._idx, self._idy], wave, index)
+        pars = self.maps['params'][:, self._idx, self._idy]
+        zstl = (1 + self._vmap[self._idx, self._idy]) * (1 + 2.39532608e-03) - 1
+        pars[npoly:npoly+3] = np.array([2.19999997e+04, zstl, 3.75950693e+01])
+        wok = np.where((wave>np.min(self._wgrid)*(1+zstl)) & (wave<np.max(self._wgrid)*(1+zstl)))
+        model = np.ones(wave.size)
+        model[wok] = fitting.full_model(pars, wave[wok], index, stellar=self._abs_spl)
         self.model.set_ydata(model)
         self.resid.set_ydata((self.curr_flux-model)*inverse(self.curr_err))
         self.spec.set_ydata(self.curr_flux)
@@ -862,10 +878,11 @@ class CubeFitter:
         xmin, xmax = self.axes['main'].get_xlim()
         ww = np.where((self.curr_wave >= xmin) & (self.curr_wave <= xmax))
         fmax = np.max(self.curr_flux[ww])*1.1
+        fmin = np.min(self.curr_flux[ww])/1.1
         fmed = np.median(self.curr_flux[ww])
         fmad = 1.4826*np.median(np.abs(self.curr_flux[ww]-fmed))
         self.axes['main'].set_ylim(0, fmax)
-        self.axes['fit'].set_ylim(0, min(fmed+3*fmad, fmax))
+        self.axes['fit'].set_ylim(max(fmed-3*fmad, fmin), min(fmed+3*fmad, fmax))
         # Update the images
         self.image.set_data(self._imxarr, self._imyarr, self.maps['flux'])
         # Update the location of the scatter points in the images
@@ -1033,9 +1050,9 @@ if __name__ == "__main__":
     filename = "IZw18_BH2_newSensFunc.fits"
     #filename = "IZw18_B.fits"
     refit = False
-    #line, include_ab, npoly = "HIg", True, 3
-    #line, include_ab, npoly = "HId", True, 3
-    line, include_ab, npoly = "HeI4026", False, 3
+    line, grating, include_ab, npoly = "HIg", "BH2", True, 3
+    #line, grating, include_ab, npoly = "HId", "BH2", True, 3
+    #line, grating, include_ab, npoly = "HeI4026", "BH2", True, 3
     zem = (717.0 / 299792.458)
     hdus = fits.open(dirc+filename)
     wcs = WCS(hdus[1].header)
@@ -1043,4 +1060,4 @@ if __name__ == "__main__":
     sigcube = np.sqrt(hdus[2].data)
     wave = wcs.wcs_pix2world(0.0, 0.0, np.arange(datcube.shape[0]), 0)[2]*1.0E10
     # Open the Cube Fitter
-    cubefitr = CubeFitter.initialise(datcube, sigcube, wave, line, zem, dirc, filename, include_ab=include_ab, npoly=npoly, refit=refit)
+    cubefitr = CubeFitter.initialise(datcube, sigcube, wave, line, zem, dirc, filename, grating, include_ab=include_ab, npoly=npoly, refit=refit)

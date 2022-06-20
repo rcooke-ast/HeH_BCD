@@ -54,7 +54,7 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
         idx = np.append(idx, 1 * np.ones(6, dtype=int))
         if p0a is None:
             if stellar:
-                p0a = np.array([15000, zabs, 30, atom_prop['wave'], atom_prop['fval'], atom_prop['lGamma']])
+                p0a = np.array([25000, zabs, 30, atom_prop['wave'], atom_prop['fval'], atom_prop['lGamma']])
             else:
                 p0a = np.array([14.8, zabs, 400.0, atom_prop['wave'], atom_prop['fval'], atom_prop['lGamma']])
         for i in range(len(p0a)):
@@ -67,9 +67,9 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
                 else:
                     param_info[cntr + i]['limited'] = [1, 0]
                     param_info[cntr + i]['limits'] = [0, 0]
-                if p0a[0] in [0,2.19999997e+04]: param_info[cntr + i]['fixed'] = 1
+                if p0a[0] in [0,12492.43252,12499.999,2.19999997e+04,29999.999]: param_info[cntr + i]['fixed'] = 1
             elif i == 1:
-                if p0a[0] in [0,2.19999997e+04]: param_info[cntr + i]['fixed'] = 1
+                if p0a[0] in [0,12492.43252,12499.999,2.19999997e+04,29999.999]: param_info[cntr + i]['fixed'] = 1
             elif i == 2:
                 if stellar:
                     param_info[cntr + i]['limited'] = [1, 1]
@@ -77,7 +77,7 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
                 else:
                     param_info[cntr + i]['limited'] = [1, 0]
                     param_info[cntr + i]['limits'] = [1, 0]
-                if p0a[0] in [0,2.19999997e+04]: param_info[cntr + i]['fixed'] = 1
+                if p0a[0] in [0,12492.43252,12499.999,2.19999997e+04,29999.999]: param_info[cntr + i]['fixed'] = 1
             elif i == 3:
                 param_info[cntr + i]['fixed'] = 1
             elif i == 4:
@@ -245,7 +245,7 @@ def fit_one_cont(atom_prop, wave, spec, errs, mask,
 
 def fit_stellar_abs(atom_prop, wave, spec, errs, mask, grating='BH2',
                     npoly=2, contsample=100, verbose=True,
-                    p0c=None, p0a=None, p0e=None,
+                    p0c=None, p0a=None, p0e=None, quiet=True,
                     include_em=False, include_ab=True):
     # Perform a fit
     ww = np.where((mask == 1) & (errs != 0.0) & (spec != 0.0))
@@ -267,7 +267,7 @@ def fit_stellar_abs(atom_prop, wave, spec, errs, mask, grating='BH2',
     fa = {'wave': fitwave, 'flux': fitspec, 'errs': fiterrs, 'idx': idx, 'stellar':abs_spl}
 
     if verbose: print("Fitting continuum and stellar absorption")
-    m = mpfit.mpfit(resid, pinit, parinfo=param_info, functkw=fa, quiet=True)
+    m = mpfit.mpfit(resid, pinit, parinfo=param_info, functkw=fa, quiet=quiet)
 
     wg = np.where((wave>np.min(fitwave)) & (wave<np.max(fitwave)))
     wavefin = wave[wg]

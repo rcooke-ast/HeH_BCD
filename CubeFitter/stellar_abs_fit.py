@@ -10,9 +10,9 @@ from cubefit import get_mapname, mask_one
 from IPython import embed
 
 # Set the properties of the extraction/fit
-line, grating, npoly, xl, xr = "HIg", "BH2", 3, 100, 0   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
-#line, npoly = "HId", 3
-#line, npoly = "HeI4026", 3
+#line, grating, npoly, xl, xr, pad = "HIg", "BH2", 3, 250, 150, 4   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
+#line, grating, npoly, xl, xr, pad = "HId", "BH2", 3, 200, 150, 4   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
+line, grating, npoly, xl, xr, pad = "HeI4026", "BH2", 3, 120, 120, 1   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
 linear = True  # Use a linear fit to the continuum regions?
 plotit = True  # Plot some QA?
 
@@ -119,25 +119,57 @@ plt.show()
 # Perform a fit to the continuum+absorption of the combined spectrum
 embed()
 assert(False)
-final_mask = mask_one(final_spec, np.argmax(final_spec), pad=4)
-final_mask[:np.argmax(final_spec)-150-xl] = 0
-final_mask[np.argmax(final_spec)+150+xr:] = 0
+final_mask = mask_one(final_spec, np.argmax(final_spec), pad=pad)
+final_mask[:np.argmax(final_spec)-xl] = 0
+final_mask[np.argmax(final_spec)+xr:] = 0
 if plotit:
     plt.plot(out_wave[final_mask == 0], final_spec[final_mask == 0], 'ro')
     plt.plot(out_wave, final_spec, 'k-', drawstyle='steps-mid')
     plt.show()
+
+# Brute force to get starting params
+# plt.plot(out_wave[final_mask == 0], final_spec[final_mask == 0], 'ro')
+# plt.plot(out_wave, final_spec, 'k-', drawstyle='steps-mid')
+# contt = np.polyval(pars[:npoly], out_wave)
+# plt.plot(out_wave, contt, 'g-')
+bstt, bstg, chisq = -1, -1, 1.0E32
+tgrid, ggrid, wgrid, abs_spl = fitting.get_bohlin_spline(grating, atom_prop['line'])
+for tt in range(tgrid.size):
+    for gg in range(ggrid.size):
+        pars = np.array([tgrid[tt], 0.002379467609, ggrid[gg]])
+        try:
+            model = fitting.func_stellarabs(pars, out_wave, abs_spl)
+        except:
+            continue
+        if np.all(model == 1): continue
+        tchisq = np.sum(np.abs(model-final_spec)[final_mask==1])
+        if tchisq < chisq:
+            chisq = tchisq
+            bstg = gg
+            bstt = tt
+        #plt.plot(out_wave, model, 'r-', alpha=0.1)
+#plt.show()
+
 #p0a = np.array([14.0, out_wave[np.argmax(final_spec)]/atom_prop['wave']-1, 100.0, atom_prop['wave'], atom_prop['fval'], 13])
-p0a = np.array([15000.0, out_wave[np.argmax(final_spec)]/atom_prop['wave']-1, 30, atom_prop['wave'], atom_prop['fval'], 0])
+p0a = np.array([tgrid[bstt], out_wave[np.argmax(final_spec)]/atom_prop['wave']-1, ggrid[bstg], atom_prop['wave'], atom_prop['fval'], 0])
 # Perform the fit
 flxsum, errsum, contval, pars = fitting.fit_stellar_abs(atom_prop, out_wave, final_spec, final_spec_err, final_mask,
                                                         npoly=npoly, grating=grating, contsample=100, verbose=True,
-                                                        p0c=None, p0a=p0a, p0e=None,
+                                                        p0c=None, p0a=p0a, p0e=None, quiet=False,
                                                         include_em=False, include_ab=True)
+#pars = np.append([0,0,1],p0a)
 index = np.ones(npoly+6, dtype=int)
 index[:npoly] = 0
-model = fitting.full_model(np.append(pars[:npoly],p0a), out_wave, index)
+#model = fitting.full_model(np.append(pars[:npoly],p0a), out_wave, index, stellar=abs_spl)
+model = fitting.full_model(pars, out_wave, index, stellar=abs_spl)
+pars[npoly] = 12500.0
+pars[npoly+2] = 27.26280675
+modelb = fitting.full_model(pars, out_wave, index, stellar=abs_spl)
 plt.plot(out_wave[final_mask == 0], final_spec[final_mask == 0], 'ro')
 plt.plot(out_wave, final_spec, 'k-', drawstyle='steps-mid')
+plt.plot(out_wave, np.polyval(pars[:npoly], out_wave), 'g-')
 plt.plot(out_wave, model, 'r-')
+plt.plot(out_wave, modelb, 'c-')
 plt.show()
-print("ERROR - need to make a correction map!!")
+contt = np.polyval(pars[:npoly], out_wave)
+np.savetxt(f"{line}_{grating}_stellar_abs.dat", np.column_stack((out_wave, final_spec/contt, model/contt)))

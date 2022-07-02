@@ -52,7 +52,7 @@ if make_velocity_map:
 
     vmap = (vshift - vshift[bstx, bsty])/vshift[bstx, bsty]  # this is delta lambda / lambda
     vmap[vshift==0] = 0
-    np.save(dirc+"maps/IZw18_BH2_newSensFunc_HIg_vmap.npy", vmap)
+    np.save(dirc+f"maps/IZw18_BH2_newSensFunc_{line}_vmap.npy", vmap)
     # Plot the vmap
     plt.imshow(299792.458*vmap, vmin=0, vmax=100)
     plt.show()

@@ -15,13 +15,19 @@ def full_model(p, wave, pidx, widx, aprop):
     # Continuum
     cont = np.ones_like(wave)
     for ii in range(3):
-        cont[widx == ii] = np.polyval(p[pidx == ii], wave[widx == ii])
+        this = (widx == ii)
+        if not np.any(this): continue
+        wmin, wmax = np.min(wave[this]), np.max(wave[this])
+        wfit = (wave[this]-wmin)/(wmax-wmin)
+        cont[this] = np.polyval(p[pidx == ii], wfit)
     # Absorption
     abs = np.ones_like(wave)
     zpar = p[pidx==3][0]
     for ii in range(3):
+        this = (widx == ii)
+        if not np.any(this): continue
         subpar = p[pidx == 4+ii]
-        abs[widx == ii] = func_voigt([subpar[0], zpar, 1.0E-10, aprop[ii]['wave'], aprop[ii]['fval'], subpar[1]], wave[widx == ii])
+        abs[this] = func_voigt([subpar[0], zpar, 1.0E-10, aprop[ii]['wave'], aprop[ii]['fval'], subpar[1]], wave[this])
     return cont*abs
 
 
@@ -39,10 +45,11 @@ allwave, allflux, allerrs, allmask, widx = np.array([]), np.array([]), np.array(
 # Load the data and setup the fit
 dirc = "/Users/rcooke/Work/Research/BBN/Yp/HIIregions/Software/HeH_BCD/CubeFitter/"
 fils = ["HIg", "HId", "HeI4026"]
+fitone = None#2
 aprop = [GetAtomProp(line) for line in fils]
 xl = [250, 200, 120]
 xr = [150, 150, 120]
-pad = [4, 4, 1]
+pad = [4, 4, 0]
 for ff, fil in enumerate(fils):
     wave, flux, errs = np.loadtxt(dirc+fil+"_BH2_stack.dat", unpack=True)
     final_mask = mask_one(flux, np.argmax(flux), pad=pad[ff])
@@ -55,14 +62,19 @@ for ff, fil in enumerate(fils):
     elif ff == 1:
         wman = np.where(((wave > 4137.0) & (wave < 4149.0)) | ((wave > 4071.0) & (wave < 4078.0)))
     elif ff == 2:
-        wman = np.where(((wave > 4010.0) & (wave < 4018.0)) | ((wave > 4044.0) & (wave < 4066.0)))
+        wman = np.where(((wave > 4010.0) & (wave < 4018.0)) | ((wave > 4044.0) & (wave < 4066.0)) | ((wave > 4034.0) & (wave < 4036.0)))
     if wman is not None:
         final_mask[wman] = 1
+    # Check if we're just fitting one spectrum
+    scale = 1
+    if fitone is not None:
+        if fitone != ff:
+            scale = 0
     # Store the data
     allwave = np.append(allwave, wave)
     allflux = np.append(allflux, flux)
     allerrs = np.append(allerrs, errs)
-    allmask = np.append(allmask, final_mask.copy())
+    allmask = np.append(allmask, final_mask.copy()*scale)
     widx = np.append(widx, ff*np.ones(flux.size))
 
 # Starting params
@@ -72,7 +84,7 @@ param_info = []
 param_base = {'value': 0., 'fixed': 0, 'limited': [0, 0], 'limits': [0., 0.], 'step': 0}
 
 # Set up the continuum parameters
-npoly = [4, 4, 4]
+npoly = [6, 6, 6]
 cntr = 0
 for pp in range(len(npoly)):
     ptmp = np.zeros(npoly[pp])
@@ -125,7 +137,9 @@ model = full_model(m.params, allwave, pidx, widx, aprop)
 
 for ff, fil in enumerate(fils):
     this = (widx==ff)
-    cont = np.polyval(m.params[pidx == ff], allwave[this])
+    wmin, wmax = np.min(allwave[this]), np.max(allwave[this])
+    wfit = (allwave[this]-wmin)/(wmax-wmin)
+    cont = np.polyval(m.params[pidx == ff], wfit)
     np.savetxt(dirc+fil+"_BH2_stack_fit.dat", np.column_stack((allwave[this],allflux[this]/cont,allerrs[this]/cont,model[this]/cont)))
     plt.subplot(1,3,ff+1)
     plt.plot(allwave[widx==ff], allflux[widx==ff]/cont, 'k-', drawstyle='steps-mid')

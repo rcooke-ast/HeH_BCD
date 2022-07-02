@@ -194,9 +194,9 @@ class CubeFitter:
         #             mskcube[amtmp[-1]-20:,xx,yy] = 0
 
         # TODO :: REMOVE -- This was a fix to convert the fits from legendre to polyonomial
-        # mapname = get_mapname(dirc, fname, line)
-        # all_maps, mskcube = load_maps(mapname)
-        # vmap = np.load(dirc + "maps/IZw18_BH2_newSensFunc_HIg_vmap.npy")
+        mapname = get_mapname(dirc, fname, line)
+        all_maps, mskcube = load_maps(mapname)
+        vmap = np.load(dirc + "maps/IZw18_BH2_newSensFunc_HIg_vmap.npy")
         # for xx in range(datcube.shape[1]):
         #     for yy in range(datcube.shape[2]):
         #         flx, err, msk = datcube[:, xx, yy], sigcube[:, xx, yy], mskcube[:, xx, yy]
@@ -217,7 +217,7 @@ class CubeFitter:
                 print(f"fitting row {xx+1}/{datcube.shape[1]}")
                 for yy in range(datcube.shape[2]):
                     p0c, p0a = None, None
-                    if False:
+                    if True:
                         # Refitting the data
                         if all_maps['params'][0, xx, yy] == 0:
                             continue
@@ -227,24 +227,23 @@ class CubeFitter:
                         # mskcube[ww, xx, yy] = 1
                         p0c = all_maps['params'][:npoly, xx, yy]
                         # TODO :: The following lines contain the best-fit values of HIg
-                        if line=="HIg":
-                            p0a = all_maps['params'][npoly:, xx, yy]
-                            zstl = (1+vmap[xx,yy]) * (1+0.002379467609) - 1
-                            #p0a[0:3] = np.array([2.19999997e+04, zstl, 3.75950693e+01])
-                            p0a[0:3] = np.array([12492.43252, zstl, 27.00872819])
-                        elif line == "HId":
-                            p0a = all_maps['params'][npoly:, xx, yy]
-                            zstl = (1+vmap[xx,yy]) * (1+0.002354126804) - 1
-                            #p0a[0:3] = np.array([2.19999997e+04, zstl, 3.75950693e+01])
-                            p0a[0:3] = np.array([12499.999, zstl, 27.26280675])
-                            # P3 = 12500
-                            # P4 = 0.002354126804
-                            # P5 = 27.26280675
-                        elif line == "HeI4026":
-                            zstl = (1+vmap[xx,yy]) * (1+2.37095558e-03) - 1
-                            p0a = np.array([29999.999, zstl, 4.38637346e+01, atom_prop['wave'], atom_prop['fval'], 0.0])
+                        p0a = all_maps['params'][npoly:, xx, yy]
+                        p0a[-3] = atom_prop['wave']
+                        p0a[-2] = atom_prop['fval']
+                        if line == 'HIg':
+                            zstl = (1 + vmap[xx, yy]) * (1 + 0.002371194765) - 1
+                            p0a[0:3] = np.array([14.611626, zstl, 1.0E-10])
+                            p0a[-1] = 12.88511136
+                        elif line == 'HId':
+                            zstl = (1 + vmap[xx, yy]) * (1 + 0.002371194765) - 1
+                            p0a[0:3] = np.array([15.02934536, zstl, 1.0E-10])
+                            p0a[-1] = 12.96919159
+                        elif line == 'HeI4026':
+                            zstl = (1 + vmap[xx, yy]) * (1 + 0.002371194765) - 1
+                            p0a[0:3] = np.array([13.94769654, zstl, 1.0E-10])
+                            p0a[-1] = 12.89340306
                     flx, err, msk = datcube[:, xx, yy], sigcube[:, xx, yy], mskcube[:, xx, yy]
-                    flxsum, errsum, contval, pars = fitting.fit_stellar_abs(atom_prop, wave, flx, err, msk, grating=grating, npoly=npoly, contsample=100, verbose=False, include_ab=include_ab, p0c=p0c, p0a=p0a)
+                    flxsum, errsum, contval, pars = fitting.fit_lorentz_abs(atom_prop, wave, flx, err, msk, grating=grating, npoly=npoly, contsample=100, verbose=False, include_ab=include_ab, p0c=p0c, p0a=p0a)
                     if flxsum is None:
                         # Something failed.
                         continue
@@ -768,20 +767,23 @@ class CubeFitter:
         #     self._p0a = np.array([0.0, 0.0, 300.0, self._atomprop['wave'], self._atomprop['fval'], 0.0])
         self._p0a = self.maps['params'][self._npoly:, self._idx, self._idy]
         if self._atomprop['line'] == 'HIg':
-            zstl = (1 + self._vmap[self._idx, self._idy]) * (1 + 0.002379467609) - 1
-            self._p0a[0:3] = np.array([12492.43252, zstl, 27.00872819])
+            zstl = (1 + self._vmap[self._idx, self._idy]) * (1 + 0.002371194765) - 1
+            self._p0a[0:3] = np.array([14.611626, zstl, 1.0E-10])
+            self._p0a[-1] = 12.88511136
         elif self._atomprop['line'] == 'HId':
-            zstl = (1 + self._vmap[self._idx, self._idy]) * (1 + 0.002354126804) - 1
-            self._p0a[0:3] = np.array([12499.999, zstl, 27.26280675])
+            zstl = (1 + self._vmap[self._idx, self._idy]) * (1 + 0.002371194765) - 1
+            self._p0a[0:3] = np.array([15.02934536, zstl, 1.0E-10])
+            self._p0a[-1] = 12.96919159
         elif self._atomprop['line'] == 'HeI4026':
-            zstl = (1 + self._vmap[self._idx, self._idy]) * (1 + 2.37095558e-03) - 1
-            self._p0a[0:3] = np.array([29999.999, zstl, 4.38637346e+01])
+            zstl = (1 + self._vmap[self._idx, self._idy]) * (1 + 0.002371194765) - 1
+            self._p0a[0:3] = np.array([13.94769654, zstl, 1.0E-10])
+            self._p0a[-1] = 12.89340306
         # if self._atomprop['line'] == 'HIg':
         #     self._p0a[0:3] = np.array([2.19999997e+04, 2.39532608e-03, 3.75950693e+01])
         # elif self._atomprop['line'] == 'HeI4026':
         #     self._p0a[0:3] = np.array([29999.999, 2.37095558e-03, 4.38637346e+01])
         # Perform the fit
-        flxsum, errsum, contval, pars = fitting.fit_stellar_abs(self._atomprop, self.curr_wave, self.curr_flux, self.curr_err, self._fitregions,
+        flxsum, errsum, contval, pars = fitting.fit_lorentz_abs(self._atomprop, self.curr_wave, self.curr_flux, self.curr_err, self._fitregions,
                                                              contsample=100, verbose=False, p0c=self._p0c, p0a=self._p0a, p0e=self._p0e,
                                                              include_ab=self._include_ab, npoly=self._npoly, include_em=include_em, grating=self._grating)
         if flxsum is None:
@@ -892,17 +894,21 @@ class CubeFitter:
         _, _, index = fitting.prepare_fitting(self._atomprop, self.curr_wave, self.datacube[:, self._idx, self._idy], npoly=self._npoly, include_ab=self._include_ab)
         pars = self.maps['params'][:, self._idx, self._idy]
         if self._atomprop['line'] == 'HIg':
-            zstl = (1 + self._vmap[self._idx, self._idy]) * (1 + 0.002379467609) - 1
-            pars[npoly:npoly+3] = np.array([12492.43252, zstl, 27.00872819])
+            zstl = (1 + self._vmap[self._idx, self._idy]) * (1 + 0.002371194765) - 1
+            pars[npoly:npoly+3] = np.array([14.611626, zstl, 1.0E-10])
+            pars[npoly+5] = 12.88511136
         elif self._atomprop['line'] == 'HId':
-            zstl = (1 + self._vmap[self._idx, self._idy]) * (1 + 0.002354126804) - 1
-            pars[npoly:npoly+3] = np.array([12499.999, zstl, 27.26280675])
+            zstl = (1 + self._vmap[self._idx, self._idy]) * (1 + 0.002371194765) - 1
+            pars[npoly:npoly+3] = np.array([15.02934536, zstl, 1.0E-10])
+            pars[npoly+5] = 12.96919159
         elif self._atomprop['line'] == 'HeI4026':
-            zstl = (1 + self._vmap[self._idx, self._idy]) * (1 + 2.37095558e-03) - 1
-            pars[npoly:npoly+3] = np.array([29999.999, zstl, 4.38637346e+01])
+            zstl = (1 + self._vmap[self._idx, self._idy]) * (1 + 0.002371194765) - 1
+            pars[npoly:npoly+3] = np.array([13.94769654, zstl, 1.0E-10])
+            pars[npoly+5] = 12.89340306
         wok = np.where((wave>np.min(self._wgrid)*(1+zstl)) & (wave<np.max(self._wgrid)*(1+zstl)))
         model = np.ones(wave.size)
-        model[wok] = fitting.full_model(pars, wave[wok], index, stellar=self._abs_spl)
+        model[wok] = fitting.full_model(pars, wave[wok], index)
+        #model[wok] = fitting.full_model(pars, wave[wok], index, stellar=self._abs_spl)
         self.model.set_ydata(model)
         self.resid.set_ydata((self.curr_flux-model)*inverse(self.curr_err))
         self.spec.set_ydata(self.curr_flux)
@@ -1082,7 +1088,7 @@ if __name__ == "__main__":
     dirc = "../../../IZw18_KCWI/final_cubes/"
     filename = "IZw18_BH2_newSensFunc.fits"
     #filename = "IZw18_B.fits"
-    refit = False
+    refit = True
     #line, grating, include_ab, npoly = "HIg", "BH2", True, 3
     #line, grating, include_ab, npoly = "HId", "BH2", True, 3
     line, grating, include_ab, npoly = "HeI4026", "BH2", True, 3

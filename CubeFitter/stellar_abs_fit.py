@@ -10,9 +10,9 @@ from cubefit import get_mapname, mask_one
 from IPython import embed
 
 # Set the properties of the extraction/fit
-#line, grating, npoly, xl, xr, pad = "HIg", "BH2", 3, 250, 150, 4   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
+line, grating, npoly, xl, xr, pad = "HIg", "BH2", 3, 250, 150, 4   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
 #line, grating, npoly, xl, xr, pad = "HId", "BH2", 3, 200, 150, 4   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
-line, grating, npoly, xl, xr, pad = "HeI4026", "BH2", 3, 120, 120, 1   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
+#line, grating, npoly, xl, xr, pad = "HeI4026", "BH2", 3, 120, 120, 1   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
 linear = True  # Use a linear fit to the continuum regions?
 plotit = True  # Plot some QA?
 
@@ -115,6 +115,7 @@ final_spec_err = np.sqrt(variance)
 plt.plot(out_wave, final_spec, 'k-', drawstyle='steps')
 plt.plot(out_wave, final_spec_err, 'r-', drawstyle='steps')
 plt.show()
+np.savetxt(f"{line}_{grating}_stack.dat", np.column_stack((out_wave, final_spec, final_spec_err)))
 
 # Perform a fit to the continuum+absorption of the combined spectrum
 embed()

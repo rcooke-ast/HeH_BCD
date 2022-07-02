@@ -56,7 +56,7 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
             if stellar:
                 p0a = np.array([25000, zabs, 30, atom_prop['wave'], atom_prop['fval'], atom_prop['lGamma']])
             else:
-                p0a = np.array([14.8, zabs, 400.0, atom_prop['wave'], atom_prop['fval'], atom_prop['lGamma']])
+                p0a = np.array([13.0, zabs, 400.0, atom_prop['wave'], atom_prop['fval'], atom_prop['lGamma']])
         for i in range(len(p0a)):
             param_info.append(copy.deepcopy(param_base))
             param_info[cntr + i]['value'] = p0a[i]
@@ -67,17 +67,17 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
                 else:
                     param_info[cntr + i]['limited'] = [1, 0]
                     param_info[cntr + i]['limits'] = [0, 0]
-                if p0a[0] in [0,12492.43252,12499.999,2.19999997e+04,29999.999]: param_info[cntr + i]['fixed'] = 1
+                if p0a[0] in [0,14.611626,15.02934536,13.94769654]: param_info[cntr + i]['fixed'] = 1
             elif i == 1:
-                if p0a[0] in [0,12492.43252,12499.999,2.19999997e+04,29999.999]: param_info[cntr + i]['fixed'] = 1
+                if p0a[0] in [0,14.611626,15.02934536,13.94769654]: param_info[cntr + i]['fixed'] = 1
             elif i == 2:
                 if stellar:
                     param_info[cntr + i]['limited'] = [1, 1]
                     param_info[cntr + i]['limits'] = [0, 50]
                 else:
                     param_info[cntr + i]['limited'] = [1, 0]
-                    param_info[cntr + i]['limits'] = [1, 0]
-                if p0a[0] in [0,12492.43252,12499.999,2.19999997e+04,29999.999]: param_info[cntr + i]['fixed'] = 1
+                    param_info[cntr + i]['limits'] = [1.0E-11, 0]
+                if p0a[0] in [0,14.611626,15.02934536,13.94769654]: param_info[cntr + i]['fixed'] = 1
             elif i == 3:
                 param_info[cntr + i]['fixed'] = 1
             elif i == 4:
@@ -302,6 +302,74 @@ def fit_stellar_abs(atom_prop, wave, spec, errs, mask, grating='BH2',
     if verbose: print("Calculating flux and error")
     # Calculate the best values
     contabs = full_model(m.params, wavefin, idx, stellar=abs_spl)
+    specnew = specfin - contabs
+    # Now get just the continuum value
+    cpar, _, _ = extract_params(m.params, idx)
+    cont = func_cont(cpar, wavefin)
+    cont_val = cont[np.argmax(specfin)]  # Pick the continuum where the flux is maximum
+    # Integrate over the masked regions (the mask is included in wdiff)
+    sum_flux = np.sum(specnew * wdiff)
+    # Add in the continuum error
+    sum_err = scale * np.sqrt(np.sum((errsfin * wdiff) ** 2) + np.std(tmp_sum[tmp_sum!=0]) ** 2)
+    return sum_flux, sum_err, cont_val, m.params
+
+
+def fit_lorentz_abs(atom_prop, wave, spec, errs, mask, grating='BH2',
+                    npoly=2, contsample=100, verbose=True,
+                    p0c=None, p0a=None, p0e=None, quiet=True,
+                    include_em=False, include_ab=True):
+    # Perform a fit
+    ww = np.where((mask == 1) & (errs != 0.0) & (spec != 0.0))
+    if ww[0].size <= 5:
+        return None, None, None, None
+    fitspec = spec[ww]
+    fiterrs = errs[ww]
+    fitwave = wave[ww]
+
+    # Initialise the fitting
+    pinit, param_info, idx = prepare_fitting(atom_prop, fitwave, fitspec, stellar=False,
+                                             npoly=npoly, p0c=p0c, p0a=p0a, p0e=p0e,
+                                             include_ab=include_ab, include_em=include_em)
+
+    # Now tell the fitting program what we called our variables
+    fa = {'wave': fitwave, 'flux': fitspec, 'errs': fiterrs, 'idx': idx}
+
+    if verbose: print("Fitting continuum and stellar absorption")
+    m = mpfit.mpfit(resid, pinit, parinfo=param_info, functkw=fa, quiet=quiet)
+
+    wg = np.where((wave>np.min(fitwave)) & (wave<np.max(fitwave)))
+    wavefin = wave[wg]
+    specfin = spec[wg]
+    errsfin = errs[wg]
+    # Make the emission mask
+    emis_gpm = np.zeros(wavefin.size)
+    emis_gpm[np.where((wavefin >= np.min(fitwave)) & (wavefin <= np.max(fitwave)))] = 1
+    emis_gpm -= mask[wg]
+
+    # Subtract the continuum and then sum everything above zero
+    wdiff = np.append(wavefin[1] - wavefin[0], np.diff(wavefin)) * emis_gpm  # Fold in the mask here to save computation in the loop
+    tmp_sum = 0.0
+    try:
+        if verbose: print("Sampling continuum")
+        tmp_sum = np.zeros(contsample)
+        ptb = np.zeros((m.params.size, contsample))
+        ptb[np.where(m.perror != 0)[0], :] = newstart(m.covar, contsample)
+        contpars = (np.outer(m.params, np.ones(contsample)) + ptb)
+        for ss in range(contsample):
+            part = np.squeeze(np.asarray(contpars[:, ss]))
+            cont = full_model(part, wavefin, idx)
+            specnew = specfin - cont
+            # Integrate over the masked region
+            tmp_sum[ss] = np.sum(specnew * wdiff)
+        scale = 1
+    except:
+        # Cont fit errors failed - just double the error, probably it's just noise.
+        embed()
+        print("ERROR calculating total flux and error")
+        scale = 2
+    if verbose: print("Calculating flux and error")
+    # Calculate the best values
+    contabs = full_model(m.params, wavefin, idx)
     specnew = specfin - contabs
     # Now get just the continuum value
     cpar, _, _ = extract_params(m.params, idx)

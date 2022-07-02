@@ -53,8 +53,8 @@ full_path = dirc + carbon + "/" + alpha + "/*"
 all_files = glob.glob(full_path)
 
 # Set the transition parameters
-#line, delwave, grating, slicer = "HIg", 100, "BH2", "Small"
-line, delwave, grating, slicer = "HId", 100, "BH2", "Small"
+line, delwave, grating, slicer = "HIg", 100, "BM", "Small"
+#line, delwave, grating, slicer = "HId", 100, "BH2", "Small"
 #line, delwave, grating, slicer = "HeI4026", 100, "BH2", "Small"
 
 resln = get_resln(grating, slicer)

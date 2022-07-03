@@ -10,15 +10,21 @@ from cubefit import get_mapname, mask_one
 from IPython import embed
 
 # Set the properties of the extraction/fit
-line, grating, npoly, xl, xr, pad = "HIg", "BH2", 3, 250, 150, 4   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
+#line, grating, npoly, xl, xr, pad = "HIg", "BH2", 3, 250, 150, 4   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
 #line, grating, npoly, xl, xr, pad = "HId", "BH2", 3, 200, 150, 4   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
 #line, grating, npoly, xl, xr, pad = "HeI4026", "BH2", 3, 120, 120, 1   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
+line, grating, npoly, xl, xr, pad = "HIg", "BM", 3, 125, 75, 2   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
+#line, grating, npoly, xl, xr, pad = "HId", "BM", 3, 125, 75, 2   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
+#line, grating, npoly, xl, xr, pad = "HeI4472", "BM", 3, 125, 75, 2   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
 linear = True  # Use a linear fit to the continuum regions?
 plotit = True  # Plot some QA?
 
 # Load the datacubes
 dirc = "../../../IZw18_KCWI/final_cubes/"
-filename = "IZw18_BH2_newSensFunc.fits"
+if grating == "BH2":
+    filename = "IZw18_BH2_newSensFunc.fits"
+elif grating == "BM":
+    filename = "IZw18_B.fits"
 hdus = fits.open(dirc+filename)
 wcs = WCS(hdus[1].header)
 datcube = hdus[1].data
@@ -61,9 +67,9 @@ else:
 
 if plotit:
     xx, yy = 30, 30
-    plt.plot(wave/(1+vmap[xx,yy]), datcube[:,xx,yy]/np.max(datcube[:,xx,yy]), 'r-')
+    plt.plot(wave/(1+vmap[xx,yy])/(1+0.002363156706), datcube[:,xx,yy]/np.max(datcube[:,xx,yy]), 'r-')
     xx, yy = 45, 21
-    plt.plot(wave/(1+vmap[xx,yy]), datcube[:,xx,yy]/np.max(datcube[:,xx,yy]), 'k-')
+    plt.plot(wave/(1+vmap[xx,yy])/(1+0.002363156706), datcube[:,xx,yy]/np.max(datcube[:,xx,yy]), 'k-')
     plt.show()
 
 raw_specs = []
@@ -108,12 +114,13 @@ final_flux = np.ma.array(flx_ma.data, mask=new_mask, fill_value=0.0)
 final_flue = np.ma.array(out_flue, mask=new_mask, fill_value=0.0)
 # Compute the final weighted spectrum
 ivar = utils.inverse(final_flue**2)
-final_spec = np.ma.average(final_flux, weights=ivar, axis=1)
-variance = np.ma.average((final_flux-final_spec[:,np.newaxis])**2, weights=ivar, axis=1)
-final_spec_err = np.sqrt(variance)
+norm_spec = utils.inverse(np.ma.sum(ivar, axis=1))
+final_spec = np.ma.sum(final_flux*ivar, axis=1) * norm_spec
+#variance = np.ma.average((final_flux-final_spec[:,np.newaxis])**2, weights=ivar, axis=1)
+final_spec_err = np.sqrt(norm_spec)
 # Plot it
-plt.plot(out_wave, final_spec, 'k-', drawstyle='steps')
-plt.plot(out_wave, final_spec_err, 'r-', drawstyle='steps')
+plt.plot(out_wave/(1+0.002363156706), final_spec, 'k-', drawstyle='steps')
+plt.plot(out_wave/(1+0.002363156706), final_spec_err, 'r-', drawstyle='steps')
 plt.show()
 np.savetxt(f"{line}_{grating}_stack.dat", np.column_stack((out_wave, final_spec, final_spec_err)))
 

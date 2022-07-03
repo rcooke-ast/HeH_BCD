@@ -1,6 +1,6 @@
 import numpy as np
 import mpfit_single as mpfit
-from fitting import get_bohlin_spline, func_voigt
+from fitting import get_bohlin_spline, func_voigt, newstart
 from atomic_info import GetAtomProp
 from matplotlib import pyplot as plt
 import matplotlib.transforms as mtransforms
@@ -57,11 +57,11 @@ for ff, fil in enumerate(fils):
     final_mask[np.argmax(flux) + xr[ff]:] = 0
     # Some manual unmasking
     wman = None
-    if ff == 0:
+    if fil == "HIg":
         wman = np.where(((wave > 4302.0) & (wave < 4327.0)) | ((wave > 4382.0) & (wave < 4390.0)))
-    elif ff == 1:
+    elif fil == "HId":
         wman = np.where(((wave > 4137.0) & (wave < 4149.0)) | ((wave > 4071.0) & (wave < 4078.0)))
-    elif ff == 2:
+    elif fil == "HeI4026":
         wman = np.where(((wave > 4010.0) & (wave < 4018.0)) | ((wave > 4044.0) & (wave < 4066.0)) | ((wave > 4034.0) & (wave < 4036.0)))
     if wman is not None:
         final_mask[wman] = 1
@@ -135,15 +135,42 @@ model = full_model(m.params, allwave, pidx, widx, aprop)
 # plt.ylim([0.5,1.2])
 # plt.show()
 
+# Sample the covariance matrix
+ptb = newstart(m.covar, 1000)
 for ff, fil in enumerate(fils):
     this = (widx==ff)
     wmin, wmax = np.min(allwave[this]), np.max(allwave[this])
     wfit = (allwave[this]-wmin)/(wmax-wmin)
     cont = np.polyval(m.params[pidx == ff], wfit)
     np.savetxt(dirc+fil+"_BH2_stack_fit.dat", np.column_stack((allwave[this],allflux[this]/cont,allerrs[this]/cont,model[this]/cont)))
+    # Now sample the parameters to estimate the error associated with the underlying absorption
+    this_ptb = ptb[pidx==4+ff, :]
+    np.save(dirc+fil+"_BH2_stack_ptb.npy", this_ptb)
     plt.subplot(1,3,ff+1)
     plt.plot(allwave[widx==ff], allflux[widx==ff]/cont, 'k-', drawstyle='steps-mid')
     plt.plot(allwave[widx==ff], model[widx==ff]/cont, 'r-')
+    plt.plot(allwave[widx==ff], cont/cont, 'b--')
+    plt.fill_between(allwave[widx==ff], 0, 2, where=allmask[widx==ff]==1, facecolor='green', alpha=0.5)
+    plt.ylim([0.5,1.2])
+plt.show()
+
+embed()
+
+for ff, fil in enumerate(fils):
+    this = (widx==ff)
+    wmin, wmax = np.min(allwave[this]), np.max(allwave[this])
+    wfit = (allwave[this]-wmin)/(wmax-wmin)
+    cont = np.polyval(m.params[pidx == ff], wfit)
+    np.savetxt(dirc+fil+"_BH2_stack_fit.dat", np.column_stack((allwave[this],allflux[this]/cont,allerrs[this]/cont,model[this]/cont)))
+    # Now sample the parameters to estimate the error associated with the underlying absorption
+    this_ptb = ptb[pidx==4+ff, :]
+    np.save(dirc+fil+"_BH2_stack_ptb.npy", this_ptb)
+    plt.subplot(1,3,ff+1)
+    plt.plot(allwave[widx==ff], allflux[widx==ff]/cont, 'k-', drawstyle='steps-mid')
+    contpars = (np.outer(m.params, np.ones(1000)) + np.array(ptb))
+    for pp in range(1000):
+        model = full_model(contpars[:,pp], allwave, pidx, widx, aprop)
+        plt.plot(allwave[widx==ff], model[widx==ff]/cont, 'r-', alpha=0.01)
     plt.plot(allwave[widx==ff], cont/cont, 'b--')
     plt.fill_between(allwave[widx==ff], 0, 2, where=allmask[widx==ff]==1, facecolor='green', alpha=0.5)
     plt.ylim([0.5,1.2])

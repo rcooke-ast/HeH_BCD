@@ -2,7 +2,7 @@ import numpy as np
 import mpfit_single as mpfit
 from scipy.special import wofz
 from scipy.interpolate import RegularGridInterpolator
-import copy
+import os, copy
 from IPython import embed
 
 
@@ -50,9 +50,7 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
     pinit = np.copy(p0c)
 
     # Set up the absorption
-    n1 = 14.62087405
-    n2 = 15.04694712
-    n3 = 13.86692882
+    anyn = [0, 14.62087405, 15.04694712, 13.86692882, 13.07889326]
     if include_ab:
         idx = np.append(idx, 1 * np.ones(6, dtype=int))
         if p0a is None:
@@ -70,9 +68,9 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
                 else:
                     param_info[cntr + i]['limited'] = [1, 0]
                     param_info[cntr + i]['limits'] = [0, 0]
-                if p0a[0] in [0,n1, n2, n3]: param_info[cntr + i]['fixed'] = 1
+                if p0a[0] in anyn: param_info[cntr + i]['fixed'] = 1
             elif i == 1:
-                if p0a[0] in [0,n1, n2,n3]: param_info[cntr + i]['fixed'] = 1
+                if p0a[0] in anyn: param_info[cntr + i]['fixed'] = 1
             elif i == 2:
                 if stellar:
                     param_info[cntr + i]['limited'] = [1, 1]
@@ -80,7 +78,7 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
                 else:
                     param_info[cntr + i]['limited'] = [1, 0]
                     param_info[cntr + i]['limits'] = [1.0E-11, 0]
-                if p0a[0] in [0,n1, n2, n3]: param_info[cntr + i]['fixed'] = 1
+                if p0a[0] in anyn: param_info[cntr + i]['fixed'] = 1
             elif i == 3:
                 param_info[cntr + i]['fixed'] = 1
             elif i == 4:
@@ -318,7 +316,7 @@ def fit_stellar_abs(atom_prop, wave, spec, errs, mask, grating='BH2',
 
 
 def fit_lorentz_abs(atom_prop, wave, spec, errs, mask, grating='BH2',
-                    npoly=2, contsample=100, verbose=True,
+                    npoly=2, contsample=1000, verbose=True,
                     p0c=None, p0a=None, p0e=None, quiet=True,
                     include_em=False, include_ab=True):
     # Perform a fit
@@ -358,6 +356,12 @@ def fit_lorentz_abs(atom_prop, wave, spec, errs, mask, grating='BH2',
         ptb = np.zeros((m.params.size, contsample))
         ptb[np.where(m.perror != 0)[0], :] = newstart(m.covar, contsample)
         contpars = (np.outer(m.params, np.ones(contsample)) + ptb)
+        dirc = "/Users/rcooke/Work/Research/BBN/Yp/HIIregions/Software/HeH_BCD/CubeFitter/"
+        filn_colgam = dirc+atom_prop['line']+f"_{grating}_stack_ptb.npy"
+        if os.path.exists(filn_colgam):
+            colgam = np.load(filn_colgam)
+            contpars[-6, :] *= (np.ones(contsample) + colgam[0, :])
+            contpars[-1, :] *= (np.ones(contsample) + colgam[1, :])
         for ss in range(contsample):
             part = np.squeeze(np.asarray(contpars[:, ss]))
             cont = full_model(part, wavefin, idx)

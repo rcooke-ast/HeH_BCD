@@ -39,7 +39,8 @@ dirc = "/Users/rcooke/Work/Research/BBN/Yp/HIIregions/Software/HeH_BCD/CubeFitte
 #line, grat, xl, xr, pad, npoly = "HIg", "BH2", 250, 150, 4, 6
 #line, grat, xl, xr, pad, npoly = "HId", "BH2", 200, 150, 4, 6
 #line, grat, xl, xr, pad, npoly = "HeI4026", "BH2", 120, 120, 0, 6
-line, grat, xl, xr, pad, npoly = "HeI4472", "BM", 130, 130, 0, 6
+line, grat, xl, xr, pad, npoly = "HeI3889", "BM", 63, 130, 2, 4   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
+#line, grat, xl, xr, pad, npoly = "HeI4472", "BM", 130, 130, 0, 6
 #line, grat, xl, xr, pad, npoly = "HIg", "BM", 100, 75, 2, 6
 
 aprop = GetAtomProp(line)
@@ -55,6 +56,8 @@ elif line == "HId":
     wman = np.where(((wave > 4137.0) & (wave < 4149.0)) | ((wave > 4071.0) & (wave < 4078.0)))
 elif line == "HeI4026":
     wman = np.where(((wave > 4010.0) & (wave < 4018.0)) | ((wave > 4044.0) & (wave < 4066.0)) | ((wave > 4034.0) & (wave < 4036.0)))
+elif line == "HeI3889":
+    wman = np.where(((wave > 3901.0) & (wave < 3904.0)))
 if wman is not None:
     final_mask[wman] = 1
 # Store the data

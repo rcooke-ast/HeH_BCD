@@ -764,6 +764,8 @@ class CubeFitter:
             return 13.86692882, 12.72613673
         elif self._atomprop['line'] == 'HeI4472':  # BM
             return 13.07889326, 12.36980345
+        elif self._atomprop['line'] == 'HeI3889':  # BM
+            return 14.57888119, 12.92289401
         print("ERROR - column density & gamma not known")
 
     def perform_fit(self, include_ab=None):
@@ -1093,7 +1095,8 @@ if __name__ == "__main__":
 #    line, grating, include_ab, npoly, delwave = "HId", "BH2", True, 3, 15
 #    line, grating, include_ab, npoly, delwave = "HeI4026", "BH2", True, 3, 15
     # BM setup lines
-    line, grating, include_ab, npoly, delwave = "HeI4472", "BM", True, 3, 45
+    line, grating, include_ab, npoly, delwave = "HeI3889", "BM", True, 3, 45
+#    line, grating, include_ab, npoly, delwave = "HeI4472", "BM", True, 3, 45
 #    line, grating, include_ab, npoly, delwave = "HIg", "BM", True, 3, 45
     # Load the datacube
     if grating == "BH2":

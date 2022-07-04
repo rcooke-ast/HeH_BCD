@@ -50,7 +50,7 @@ def prepare_fitting(atom_prop, wave, spec, include_em=False, include_ab=True, np
     pinit = np.copy(p0c)
 
     # Set up the absorption
-    anyn = [0, 14.62087405, 15.04694712, 13.86692882, 13.07889326]
+    anyn = [0, 14.62087405, 15.04694712, 13.86692882, 13.07889326, 14.57888119]
     if include_ab:
         idx = np.append(idx, 1 * np.ones(6, dtype=int))
         if p0a is None:

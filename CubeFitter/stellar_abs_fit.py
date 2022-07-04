@@ -13,9 +13,10 @@ from IPython import embed
 #line, grating, npoly, xl, xr, pad = "HIg", "BH2", 3, 250, 150, 4   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
 #line, grating, npoly, xl, xr, pad = "HId", "BH2", 3, 200, 150, 4   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
 #line, grating, npoly, xl, xr, pad = "HeI4026", "BH2", 3, 120, 120, 1   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
-line, grating, npoly, xl, xr, pad = "HIg", "BM", 3, 125, 75, 2   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
+#line, grating, npoly, xl, xr, pad = "HIg", "BM", 3, 125, 75, 2   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
 #line, grating, npoly, xl, xr, pad = "HId", "BM", 3, 125, 75, 2   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
 #line, grating, npoly, xl, xr, pad = "HeI4472", "BM", 3, 125, 75, 2   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
+line, grating, npoly, xl, xr, pad = "HeI3889", "BM", 3, 125, 75, 2   # lineID, polynomial order to fit to continuum, number of extra pixels on the left (xl) and right (xr) to include in the final fit (default is +/-150 pixels of the line centre minus the emission line)
 linear = True  # Use a linear fit to the continuum regions?
 plotit = True  # Plot some QA?
 
